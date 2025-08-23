@@ -14,32 +14,32 @@ Official Pytorch implementation for "Revisiting Generative Replay for Class Incr
 
 ## Get Started
 
-- This repo is based on [MMDetection 3.3](https://github.com/open-mmlab/mmdetection). Please follow the installation of MMDetection [GETTING_STARTED.md](https://mmdetection.readthedocs.io/en/latest/get_started.html) and make sure you can run it successfully.
+- This repo is based on [MMDetection 3.3](https://github.com/open-mmlab/mmdetection)  [SD1.5](https://github.com/huggingface/diffusers). Please follow the installation of MMDetection [GETTING_STARTED.md](https://mmdetection.readthedocs.io/en/latest/get_started.html) and make sure you can run it successfully.
 ```bash
-conda create -n RGR-IOD python=3.8 -y
-source activate RGR-IOD
-pip install torch==1.11.0+cu113 torchvision==0.12.0+cu113 torchaudio==0.11.0 --extra-index-url https://download.pytorch.org/whl/cu113
+conda create -n rgr-iod python=3.9.21 -y
+conda activate rgr-iod
+pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu118
 pip install -U openmim
-mim install mmengine==0.8.5
-mim install mmcv==2.0.0
+mim install mmengine
+pip install mmcv==2.0.1 --use-pep517 -f https://download.openmmlab.com/mmcv/dist/cu118/torch2.0/index.html
 cd our project
+pip install -v -e .
+cd diffusers
 pip install -v -e .
 ```
 
 ## Dataset
-- Unzip COCO dataset into ./data/coco/
-- Run ./script/select_categories_2step.py and select_categories_nstep.py to split the COCO dataset
-```python
-# Two-step(40+40): 
-python ./script/select_categories_2step.py  # to generate instances_train2017_0-39.json and instances_train2017_40-79.json, which is placed in ./data/coco/annotations/40+40
-# Multi-step(40+10*4) trainset:
-python ./script/select_categories_nstep_train.py # divide instances_train2017_40-79.json into 4 steps [40-49, 50-59, 60-69, 70-79], which is placed in ./data/coco/annotations/40+10_4
-# Multi-step(40+10*4) valset:
-python ./script/select_categories_nstep_val.py  # divide instances_val2017.json, the valset is [0-49, 0-59, 0-69, 0-79(original file)]
-```
 
+- Unzip COCO dataset into ./data/coco/
+- Unzip VOC dataset into ./data/VOCdevkit/
+- Run `./script/coco_to_metadata.py` to build stable diffusion fine-tuning data 
+- Run 划分 `python split_voc_incremental.py --pattern 10+10` to split the VOC dataset 
 ## Checkpoints
-The base phase weights and dataset splits(40+40, 40+10_4, 70+10) can be obtained from [GoogleDriver](https://drive.google.com/drive/folders/1LqNSDyWEiAQ-Me8amLMWelnS_V8DhoJE?usp=drive_link)
+
+
+
+
+
 
 ## Train
 ```python
