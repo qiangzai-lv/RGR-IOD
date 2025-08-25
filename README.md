@@ -16,14 +16,18 @@ Official Pytorch implementation for "Revisiting Generative Replay for Class Incr
 
 - This repo is based on [MMDetection 3.3](https://github.com/open-mmlab/mmdetection)  [SD1.5](https://github.com/huggingface/diffusers). Please follow the installation of MMDetection [GETTING_STARTED.md](https://mmdetection.readthedocs.io/en/latest/get_started.html) and make sure you can run it successfully.
 ```bash
-conda create -n rgr-iod python=3.9.21 -y
+conda create -n rgr-iod python=3.11 -y
 conda activate rgr-iod
-pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu118
+pip install torch==2.1.0 torchvision==0.16.0 torchaudio==2.1.0 --index-url https://download.pytorch.org/whl/cu121
 pip install -U openmim
 mim install mmengine
-pip install mmcv==2.0.1 --use-pep517 -f https://download.openmmlab.com/mmcv/dist/cu118/torch2.0/index.html
+mim install mmcv==2.1.0
 cd our project
 pip install -v -e .
+# Create a new diffusers environment because it does not support lower versions of pytorch
+conda create -n diffusers python=3.11 -y
+conda activate diffusers
+pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu118
 cd diffusers
 pip install -v -e .
 ```
@@ -32,39 +36,36 @@ pip install -v -e .
 
 - Unzip COCO dataset into ./data/coco/
 - Unzip VOC dataset into ./data/VOCdevkit/
-- Run `./script/coco_to_metadata.py` to build stable diffusion fine-tuning data 
-- Run 划分 `python split_voc_incremental.py --pattern 10+10` to split the VOC dataset 
-## Checkpoints
+- Run `python script/coco_to_metadata.py` to build stable diffusion fine-tuning data 
+- Run 划分 `python script/split_voc_incremental.py --pattern 10+10` to split the VOC dataset 
+## Pretrain
 
+We use the following pretrained models in our framework:
 
+- [**Stable Diffusion v1-5**](https://huggingface.co/runwayml/stable-diffusion-v1-5)
 
+Please download the weights from HuggingFace and put them under the pretrain/ 
 
+### **Fine-tuning Stable Diffusion**
+
+We fine-tune **Stable Diffusion v1.5** on detection data to adapt it to the style of object detection for generative replay.
+
+```bash
+conda activate diffusers
+bash script/finetune_sd_coco_lora.sh
+```
 
 
 ## Train
 ```python
 # assume that you are under the root directory of this project,
-
-# Two-step(70+10)
-CUDA_VISIBLE_DEVICES=0,1,2,3 bash ./tools/dist_train.sh ./configs/gdino_inc/70+10/gdino_inc_70+10_0-69_scratch_coco.py 4   # train first 70 cats
-CUDA_VISIBLE_DEVICES=0,1,2,3 bash ./tools/dist_train.sh ./configs/gdino_inc/70+10/gdino_inc_70+10_70-79_gcd_scratch_coco.py 4 --amp # train last 10 cats incrementally
-
-# Multi-step(40+10*4)
-CUDA_VISIBLE_DEVICES=0,1,2,3 bash ./tools/dist_train.sh ./configs/gdino_inc/40+40/gdino_inc_40+40_0-39_scratch_coco.py 4   
-CUDA_VISIBLE_DEVICES=0,1,2,3 bash ./tools/dist_train.sh ./configs/gdino_inc/40+10_4/gdino_inc_40+10_4_40-49_gcd_scratch_coco.py 4 --amp
-CUDA_VISIBLE_DEVICES=0,1,2,3 bash ./tools/dist_train.sh ./configs/gdino_inc/40+10_4/gdino_inc_40+10_4_50-59_gcd_scratch_coco.py 4 --amp
-CUDA_VISIBLE_DEVICES=0,1,2,3 bash ./tools/dist_train.sh ./configs/gdino_inc/40+10_4/gdino_inc_40+10_4_60-69_gcd_scratch_coco.py 4 --amp
-CUDA_VISIBLE_DEVICES=0,1,2,3 bash ./tools/dist_train.sh ./configs/gdino_inc/40+10_4/gdino_inc_40+10_4_70-79_gcd_scratch_coco.py 4 --amp 
-```
-
-## Test
-```python
-CUDA_VISIBLE_DEVICES=0,1,2,3 bash ./tools/dist_test.sh ./configs/gdino_inc/70+10/gdino_inc_70+10_70-79_gcd_scratch_coco.py ./work_dirs/gdino_inc_70+10_70-79_gcd_scratch_coco/epoch_12.pth 4 --cfg-options test_evaluator.classwise=True
+# Two-step(10+10)
+bash ./tools/dist_train.sh configs/rgr_iod/faster-rcnn_r50_fpn_1x_voc_10_10_task0.py 4   # train base 10 cats
+bash ./tools/dist_train.sh ./configs/gdino_inc/70+10/gdino_inc_70+10_70-79_gcd_scratch_coco.py 4# train last 10 cats incrementally
 ```
 
 ## Acknowledgement
 Our code is based on the project [MMDetection](https://github.com/open-mmlab/mmdetection).
-Thanks to the work [ERD](https://github.com/Hi-FT/ERD) and [CL-DETR](https://github.com/yaoyao-liu/CL-DETR).
 
 ## Citation
 Please cite our paper if this repo helps your research:
