@@ -18,10 +18,7 @@ Official Pytorch implementation for "Revisiting Generative Replay for Class Incr
 ```bash
 conda create -n rgr-iod python=3.11 -y
 conda activate rgr-iod
-pip install torch==2.1.0 torchvision==0.16.0 torchaudio==2.1.0 --index-url https://download.pytorch.org/whl/cu121
-pip install -U openmim
-mim install mmengine
-mim install mmcv==2.1.0
+# Please follow the official MMDetection Installation Guide to set up this environment (PyTorch, MMCV, MMEngine, etc.).
 cd our project
 pip install -v -e .
 # Create a new diffusers environment because it does not support lower versions of pytorch
@@ -53,15 +50,19 @@ We fine-tune **Stable Diffusion v1.5** on detection data to adapt it to the styl
 ```bash
 conda activate diffusers
 bash script/finetune_sd_coco_lora.sh
+# Generate images at one time to reduce training costs
+python script/voc_lora_gen.py 
 ```
 
 
 ## Train
-```python
+```bash
 # assume that you are under the root directory of this project,
 # Two-step(10+10)
 bash ./tools/dist_train.sh configs/rgr_iod/faster-rcnn_r50_fpn_1x_voc_10_10_task0.py 4   # train base 10 cats
-bash ./tools/dist_train.sh ./configs/gdino_inc/70+10/gdino_inc_70+10_70-79_gcd_scratch_coco.py 4# train last 10 cats incrementally
+python script/pseudo_label_voc.py --task_and_stage 10+10_task0 # pseudo_label
+python script/voc_igr_scs.py --task_and_stage 10+10_task0 # generative replay
+bash ./tools/dist_train.sh configs/rgr_iod/faster-rcnn_r50_fpn_1x_voc_10+10_task1_rgr.py 4   # train incr 10 cats
 ```
 
 ## Acknowledgement

@@ -133,7 +133,7 @@ if __name__ == '__main__':
                         default='data/VOCdevkit/VOC2007/ImageSets/Main/test.txt',
                         help="test.txt 路径")
     parser.add_argument('--output_dir', type=str,
-                        default='data/VOCdevkit/VOC20007_split/{}/task{}_{}',
+                        default='data/VOCdevkit/VOC2007_split/{}/task{}_{}',
                         help="输出目录模板，支持格式化，例如 '.../{}/task{}_{}'")
 
     args = parser.parse_args()

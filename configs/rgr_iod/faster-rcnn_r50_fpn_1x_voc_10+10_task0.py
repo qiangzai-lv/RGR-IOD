@@ -143,8 +143,8 @@ test_pipeline = [
                    'scale_factor'))
 ]
 train_dataloader = dict(
-    batch_size=4,
-    num_workers=4,
+    batch_size=8,
+    num_workers=8,
     persistent_workers=True,
     sampler=dict(type='DefaultSampler', shuffle=True),
     batch_sampler=dict(type='AspectRatioBatchSampler'),
@@ -152,8 +152,9 @@ train_dataloader = dict(
         type=dataset_type,
         data_root=data_root,
         metainfo=dict(classes=classes),
-        ann_file='VOC20007_split/10+10/task0_trainval.txt',
-        ann_subdir='VOC20007_split/10+10/task0_trainval',
+        ann_file='VOC2007_split/10+10/task0_trainval.txt',
+        ann_subdir='data/VOCdevkit/VOC2007_split/10+10/task0_trainval',
+        img_subdir='data/VOCdevkit/VOC2007/JPEGImages',
         filter_cfg=dict(filter_empty_gt=True),
         pipeline=train_pipeline,
         backend_args=backend_args))
@@ -168,8 +169,9 @@ val_dataloader = dict(
         type=dataset_type,
         data_root=data_root,
         metainfo=dict(classes=classes),
-        ann_file='VOC20007_split/10+10/task0_test.txt',
-        ann_subdir='VOC20007_split/10+10/task0_test',
+        ann_file='VOC2007_split/10+10/task0_test.txt',
+        ann_subdir='data/VOCdevkit/VOC2007_split/10+10/task0_test',
+        img_subdir='data/VOCdevkit/VOC2007/JPEGImages',
         test_mode=True,
         pipeline=test_pipeline,
         backend_args=backend_args))
