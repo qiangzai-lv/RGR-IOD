@@ -85,5 +85,5 @@ if __name__ == '__main__':
         work_dir = work_dir + '_rgr'
     mmdet_cfg = 'work_dirs/' + work_dir + '/' + work_dir + '.py'
     mmdet_pt = 'work_dirs/' + work_dir + '/' + 'epoch_12.pth'
-    output_labels_path = input_labels + 'pseudo'
+    output_labels_path = input_labels + '_pseudo'
     main(args.input_images, input_labels, output_labels_path, mmdet_cfg, mmdet_pt, args.skip_scores, args.iou_thr)

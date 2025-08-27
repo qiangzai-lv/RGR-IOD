@@ -2,22 +2,13 @@ _base_ = [
     '../_base_/schedules/schedule_1x.py', '../_base_/default_runtime.py'
 ]
 
-num_classes = 20
-ori_num_classes = 10
+num_classes = 10
 
-classes = ['aeroplane', 'bicycle', 'bird', 'boat', 'bottle', 'bus', 'car', 'cat', 'chair', 'cow',
-           'diningtable', 'dog', 'horse', 'motorbike', 'person', 'pottedplant', 'sheep', 'sofa', 'train', 'tvmonitor']
-
-load_from = 'weight/rgr_10+10_0.pth'
+classes = ['diningtable', 'dog', 'horse', 'motorbike', 'person', 'pottedplant', 'sheep', 'sofa', 'train', 'tvmonitor']
 
 # model settings
 model = dict(
-    type='FasterRCNNRGR',
-    ori_setting=dict(
-        ori_checkpoint_file='work_dirs/faster-rcnn_r50_fpn_1x_voc_10+10_task0/epoch_12.pth',
-        ori_num_classes=ori_num_classes,
-        load_from_weight='weight/rgr_10+10_0.pth'
-    ),
+    type='FasterRCNN',
     data_preprocessor=dict(
         type='DetDataPreprocessor',
         mean=[123.675, 116.28, 103.53],
@@ -34,7 +25,6 @@ model = dict(
         norm_eval=True,
         style='pytorch',
         init_cfg=dict(type='Pretrained', checkpoint='https://download.pytorch.org/models/resnet50-11ad3fa6.pth')),
-
     neck=dict(
         type='FPN',
         in_channels=[256, 512, 1024, 2048],
@@ -152,7 +142,6 @@ test_pipeline = [
         meta_keys=('img_id', 'img_path', 'ori_shape', 'img_shape',
                    'scale_factor'))
 ]
-
 train_dataloader = dict(
     batch_size=8,
     num_workers=8,
@@ -160,37 +149,15 @@ train_dataloader = dict(
     sampler=dict(type='DefaultSampler', shuffle=True),
     batch_sampler=dict(type='AspectRatioBatchSampler'),
     dataset=dict(
-        type='ConcatDataset',
-        ignore_keys=['dataset_type'],
-        datasets=[
-            dict(
-                type=dataset_type,
-                data_root=data_root,
-                ann_file='VOC2007_split/10+10/task0_trainval.txt',
-                ann_subdir='data/VOCdevkit/VOC2007_split/10+10/task0_trainval_pseudo',
-                img_subdir='data/VOCdevkit/VOC2007/JPEGImages',
-                filter_cfg=dict(filter_empty_gt=True),
-                pipeline=train_pipeline,
-                backend_args=backend_args),
-            dict(
-                type=dataset_type,
-                data_root=data_root,
-                ann_file='VOC2007_split/10+10/task1_replay_old.txt',
-                ann_subdir='data/VOCdevkit/VOC2007_split/10+10/task1_replay_old_ann',
-                img_subdir='data/VOCdevkit/VOC2007_split/10+10/task1_replay_old_image',
-                filter_cfg=dict(filter_empty_gt=True),
-                pipeline=train_pipeline,
-                backend_args=backend_args),
-            dict(
-                type=dataset_type,
-                data_root=data_root,
-                ann_file='VOC2007_split/10+10/task1_replay_curr.txt',
-                ann_subdir='data/VOCdevkit/VOC2007_split/10+10/task1_replay_curr_ann',
-                img_subdir='data/VOCdevkit/VOC2007_split/10+10/task1_replay_curr_image',
-                filter_cfg=dict(filter_empty_gt=True),
-                pipeline=train_pipeline,
-                backend_args=backend_args),
-        ]))
+        type=dataset_type,
+        data_root=data_root,
+        metainfo=dict(classes=classes),
+        ann_file='VOC2007_split/10+10/task1_trainval.txt',
+        ann_subdir='data/VOCdevkit/VOC2007_split/10+10/task1_trainval',
+        img_subdir='data/VOCdevkit/VOC2007/JPEGImages',
+        filter_cfg=dict(filter_empty_gt=True),
+        pipeline=train_pipeline,
+        backend_args=backend_args))
 
 val_dataloader = dict(
     batch_size=8,
@@ -208,9 +175,11 @@ val_dataloader = dict(
         test_mode=True,
         pipeline=test_pipeline,
         backend_args=backend_args))
+test_dataloader = val_dataloader
 
 val_evaluator = dict(type='VOCMetric', metric='mAP', eval_mode='11points')
 test_evaluator = val_evaluator
+
 
 optim_wrapper = dict(
     type='OptimWrapper',
