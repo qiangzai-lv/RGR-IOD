@@ -69,8 +69,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Add predicted objects to VOC XML annotations with IoU filtering")
     parser.add_argument("--task_and_stage", type=str, default=' ')
     parser.add_argument("--input_images", type=str, default='data/VOCdevkit/VOC2007/JPEGImages', help="Path to input images")
-    parser.add_argument("--skip_scores", type=float, default=0.5, help="Score threshold for predictions")
-    parser.add_argument("--iou_thr", type=float, default=0.5, help="IoU threshold for filtering predictions")
+    parser.add_argument("--skip_scores", type=float, default=0.8, help="Score threshold for predictions")
+    parser.add_argument("--iou_thr", type=float, default=0.6, help="IoU threshold for filtering predictions")
     return parser.parse_args()
 
 
