@@ -62,7 +62,7 @@ python script/voc_lora_gen.py
 conda activate rgr-iod
 bash ./tools/dist_train.sh configs/rgr_iod/faster-rcnn_r50_fpn_1x_voc_10+10_task0.py 4   # train base 10 cats
 bash ./tools/dist_train.sh configs/rgr_iod/faster-rcnn_r50_fpn_1x_voc_10+10_task1_curr.py 4   # train curr 10 cats
-python script/pseudo_label_voc.py --task_and_stage 10+10_task0 # pseudo_label
+python script/pseudo_label_voc.py --task_and_stage 10+10_task1 # pseudo_label
 python script/voc_igr_scs.py --task_and_stage 10+10_task0 # generative replay
 bash ./tools/dist_train.sh configs/rgr_iod/faster-rcnn_r50_fpn_1x_voc_10+10_task1_rgr.py 4   # train incr 10 cats
 ```

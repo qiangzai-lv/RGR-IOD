@@ -79,9 +79,11 @@ if __name__ == '__main__':
 
     task = args.task_and_stage.split('_')[0]
     stage = args.task_and_stage.split('_')[1]
+    stage_id = int(stage.replace('task', ''))
     input_labels = 'data/VOCdevkit/VOC2007_split/' + task + '/' + stage + '_trainval'
-    work_dir = 'faster-rcnn_r50_fpn_1x_voc_' + args.task_and_stage
-    if stage.replace('task', '') != '0' :
+    work_dir = 'faster-rcnn_r50_fpn_1x_voc_' + task + '_task' + str(stage_id - 1)
+
+    if stage_id > 1 :
         work_dir = work_dir + '_rgr'
     mmdet_cfg = 'work_dirs/' + work_dir + '/' + work_dir + '.py'
     mmdet_pt = 'work_dirs/' + work_dir + '/' + 'epoch_12.pth'
