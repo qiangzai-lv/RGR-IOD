@@ -99,8 +99,8 @@ def select_and_copy_files(source_dir, target_dir, prefix, count=200):
 
 
 def process_images(input_dir, out_img_dir, out_ann_dir, imageset_txt, gen_num_per_cls,
-                   gen_model_cfg, gen_model_pt, filter_model_cfg, filter_model_pt, filter_iou=0.5, filter_score=0.6,
-                   skip_scores=0.5):
+                   gen_model_cfg, gen_model_pt, filter_model_cfg, filter_model_pt, filter_iou, filter_score,
+                   skip_scores=0.7):
     os.makedirs(out_img_dir, exist_ok=True)
     os.makedirs(out_ann_dir, exist_ok=True)
 
@@ -136,7 +136,7 @@ def process_images(input_dir, out_img_dir, out_ann_dir, imageset_txt, gen_num_pe
         gen_res = gen_model.predict(img_path)
         filter_res = filter_model.predict(img_path)
 
-        igr_flag = any(c == f_cls_name and s > 0.90 for c, s in zip(gen_res.cls, gen_res.scores))
+        igr_flag = any(c == f_cls_name and s > 0.9 for c, s in zip(gen_res.cls, gen_res.scores))
 
         scs_flag = any(
             calculate_max_iou(fbox, gen_res.xyxy) > filter_iou and fscore > filter_score
@@ -177,8 +177,8 @@ def parse_args():
     parser.add_argument("--task_and_stage", type=str, default='voc_10_task0')
     parser.add_argument("--input_images", type=str, default='data/SD_VOC20Images',
                         help="Path to input images")
-    parser.add_argument("--filter_score", type=float, default=0.5, help="Score threshold for predictions")
-    parser.add_argument("--filter_iou", type=float, default=0.5, help="IoU threshold for filtering predictions")
+    parser.add_argument("--filter_score", type=float, default=0.4, help="Score threshold for predictions")
+    parser.add_argument("--filter_iou", type=float, default=0.4, help="IoU threshold for filtering predictions")
     return parser.parse_args()
 
 
