@@ -166,8 +166,8 @@ train_dataloader = dict(
                 type=dataset_type,
                 data_root=data_root,
                 metainfo=dict(classes=classes),
-                ann_file='VOC2007_split/10+10/task0_trainval.txt',
-                ann_subdir='data/VOCdevkit/VOC2007_split/10+10/task0_trainval_pseudo',
+                ann_file='VOC2007_split/10+10/task1_trainval.txt',
+                ann_subdir='data/VOCdevkit/VOC2007_split/10+10/task1_trainval_pseudo',
                 img_subdir='data/VOCdevkit/VOC2007/JPEGImages',
                 filter_cfg=dict(filter_empty_gt=True),
                 pipeline=train_pipeline,
@@ -217,4 +217,4 @@ test_evaluator = val_evaluator
 
 optim_wrapper = dict(
     type='OptimWrapper',
-    optimizer=dict(type='SGD', lr=0.01, momentum=0.9, weight_decay=0.0001))
+    optimizer=dict(type='SGD', lr=0.02, momentum=0.9, weight_decay=0.0001))
