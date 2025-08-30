@@ -31,7 +31,7 @@ if __name__ == '__main__':
                         help='Directory to save generated images')
     parser.add_argument('--lora_weight', type=str, default='checkpoint-35000',
                         help='Directory to save generated images')
-    parser.add_argument('--num', type=int, default=5000,
+    parser.add_argument('--num', type=int, default=10000,
                         help='Number of images per class')
 
     args = parser.parse_args()

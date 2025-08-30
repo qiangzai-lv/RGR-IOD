@@ -152,9 +152,8 @@ test_pipeline = [
         meta_keys=('img_id', 'img_path', 'ori_shape', 'img_shape',
                    'scale_factor'))
 ]
-
 train_dataloader = dict(
-    batch_size=8,
+    batch_size=4,
     num_workers=8,
     persistent_workers=True,
     sampler=dict(type='DefaultSampler', shuffle=True),
@@ -166,6 +165,7 @@ train_dataloader = dict(
             dict(
                 type=dataset_type,
                 data_root=data_root,
+                metainfo=dict(classes=classes),
                 ann_file='VOC2007_split/10+10/task0_trainval.txt',
                 ann_subdir='data/VOCdevkit/VOC2007_split/10+10/task0_trainval_pseudo',
                 img_subdir='data/VOCdevkit/VOC2007/JPEGImages',
@@ -175,6 +175,7 @@ train_dataloader = dict(
             dict(
                 type=dataset_type,
                 data_root=data_root,
+                metainfo=dict(classes=classes),
                 ann_file='VOC2007_split/10+10/task1_replay_old.txt',
                 ann_subdir='data/VOCdevkit/VOC2007_split/10+10/task1_replay_old_ann',
                 img_subdir='data/VOCdevkit/VOC2007_split/10+10/task1_replay_old_image',
@@ -184,6 +185,7 @@ train_dataloader = dict(
             dict(
                 type=dataset_type,
                 data_root=data_root,
+                metainfo=dict(classes=classes),
                 ann_file='VOC2007_split/10+10/task1_replay_curr.txt',
                 ann_subdir='data/VOCdevkit/VOC2007_split/10+10/task1_replay_curr_ann',
                 img_subdir='data/VOCdevkit/VOC2007_split/10+10/task1_replay_curr_image',
@@ -208,6 +210,7 @@ val_dataloader = dict(
         test_mode=True,
         pipeline=test_pipeline,
         backend_args=backend_args))
+test_dataloader = val_dataloader
 
 val_evaluator = dict(type='VOCMetric', metric='mAP', eval_mode='11points')
 test_evaluator = val_evaluator

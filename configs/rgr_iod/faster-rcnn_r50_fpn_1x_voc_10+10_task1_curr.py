@@ -143,8 +143,8 @@ test_pipeline = [
                    'scale_factor'))
 ]
 train_dataloader = dict(
-    batch_size=8,
-    num_workers=8,
+    batch_size=4,
+    num_workers=4,
     persistent_workers=True,
     sampler=dict(type='DefaultSampler', shuffle=True),
     batch_sampler=dict(type='AspectRatioBatchSampler'),
@@ -183,4 +183,4 @@ test_evaluator = val_evaluator
 
 optim_wrapper = dict(
     type='OptimWrapper',
-    optimizer=dict(type='SGD', lr=0.01, momentum=0.9, weight_decay=0.0001))
+    optimizer=dict(type='SGD', lr=0.02, momentum=0.9, weight_decay=0.0001))
