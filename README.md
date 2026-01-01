@@ -34,7 +34,7 @@ pip install -v -e .
 - Unzip COCO dataset into ./data/coco/
 - Unzip VOC dataset into ./data/VOCdevkit/
 - Run `python script/coco_to_metadata.py` to build stable diffusion fine-tuning data 
-- Run 划分 `python script/split_voc_incremental.py --pattern 10+10` to split the VOC dataset 
+- Run `python script/split_voc_incremental.py --pattern 10+10` to split the VOC dataset 
 ## Pretrain
 
 We use the following pretrained models in our framework:
