@@ -1,0 +1,1 @@
+bash tools/dist_train.sh configs/rgr_iod/faster-rcnn_r50_fpn_1x_voc_0.02.py 4
