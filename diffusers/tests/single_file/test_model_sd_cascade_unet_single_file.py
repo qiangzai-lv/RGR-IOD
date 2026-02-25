@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 HuggingFace Inc.
+# Copyright 2024 HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,11 +21,9 @@ import torch
 from diffusers import StableCascadeUNet
 from diffusers.utils import logging
 from diffusers.utils.testing_utils import (
-    backend_empty_cache,
     enable_full_determinism,
-    require_torch_accelerator,
+    require_torch_gpu,
     slow,
-    torch_device,
 )
 
 
@@ -35,17 +33,17 @@ enable_full_determinism()
 
 
 @slow
-@require_torch_accelerator
+@require_torch_gpu
 class StableCascadeUNetSingleFileTest(unittest.TestCase):
     def setUp(self):
         super().setUp()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def tearDown(self):
         super().tearDown()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def test_single_file_components_stage_b(self):
         model_single_file = StableCascadeUNet.from_single_file(
@@ -60,9 +58,9 @@ class StableCascadeUNetSingleFileTest(unittest.TestCase):
         for param_name, param_value in model_single_file.config.items():
             if param_name in PARAMS_TO_IGNORE:
                 continue
-            assert model.config[param_name] == param_value, (
-                f"{param_name} differs between single file loading and pretrained loading"
-            )
+            assert (
+                model.config[param_name] == param_value
+            ), f"{param_name} differs between single file loading and pretrained loading"
 
     def test_single_file_components_stage_b_lite(self):
         model_single_file = StableCascadeUNet.from_single_file(
@@ -77,9 +75,9 @@ class StableCascadeUNetSingleFileTest(unittest.TestCase):
         for param_name, param_value in model_single_file.config.items():
             if param_name in PARAMS_TO_IGNORE:
                 continue
-            assert model.config[param_name] == param_value, (
-                f"{param_name} differs between single file loading and pretrained loading"
-            )
+            assert (
+                model.config[param_name] == param_value
+            ), f"{param_name} differs between single file loading and pretrained loading"
 
     def test_single_file_components_stage_c(self):
         model_single_file = StableCascadeUNet.from_single_file(
@@ -94,9 +92,9 @@ class StableCascadeUNetSingleFileTest(unittest.TestCase):
         for param_name, param_value in model_single_file.config.items():
             if param_name in PARAMS_TO_IGNORE:
                 continue
-            assert model.config[param_name] == param_value, (
-                f"{param_name} differs between single file loading and pretrained loading"
-            )
+            assert (
+                model.config[param_name] == param_value
+            ), f"{param_name} differs between single file loading and pretrained loading"
 
     def test_single_file_components_stage_c_lite(self):
         model_single_file = StableCascadeUNet.from_single_file(
@@ -111,6 +109,6 @@ class StableCascadeUNetSingleFileTest(unittest.TestCase):
         for param_name, param_value in model_single_file.config.items():
             if param_name in PARAMS_TO_IGNORE:
                 continue
-            assert model.config[param_name] == param_value, (
-                f"{param_name} differs between single file loading and pretrained loading"
-            )
+            assert (
+                model.config[param_name] == param_value
+            ), f"{param_name} differs between single file loading and pretrained loading"

@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 HuggingFace Inc.
+# Copyright 2024 HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -78,5 +78,5 @@ class FlaxStableDiffusionInpaintPipelineIntegrationTests(unittest.TestCase):
         expected_slice = jnp.array(
             [0.3611307, 0.37649736, 0.3757408, 0.38213953, 0.39295167, 0.3841631, 0.41554978, 0.4137475, 0.4217084]
         )
-
+        print(f"output_slice: {output_slice}")
         assert jnp.abs(output_slice - expected_slice).max() < 1e-2

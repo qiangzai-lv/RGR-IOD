@@ -1,4 +1,4 @@
-# Copyright 2025 The Intel Labs Team Authors and the HuggingFace Team. All rights reserved.
+# Copyright 2024 The Intel Labs Team Authors and the HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -30,26 +30,17 @@ from ...utils import (
     USE_PEFT_BACKEND,
     BaseOutput,
     deprecate,
-    is_torch_xla_available,
     logging,
     replace_example_docstring,
     scale_lora_layers,
     unscale_lora_layers,
 )
 from ...utils.torch_utils import randn_tensor
-from ..pipeline_utils import DeprecatedPipelineMixin, DiffusionPipeline, StableDiffusionMixin
+from ..pipeline_utils import DiffusionPipeline, StableDiffusionMixin
 from ..stable_diffusion.safety_checker import StableDiffusionSafetyChecker
 
 
-if is_torch_xla_available():
-    import torch_xla.core.xla_model as xm
-
-    XLA_AVAILABLE = True
-else:
-    XLA_AVAILABLE = False
-
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
-
 
 EXAMPLE_DOC_STRING = """
     Examples:
@@ -70,21 +61,9 @@ EXAMPLE_DOC_STRING = """
 
 # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.rescale_noise_cfg
 def rescale_noise_cfg(noise_cfg, noise_pred_text, guidance_rescale=0.0):
-    r"""
-    Rescales `noise_cfg` tensor based on `guidance_rescale` to improve image quality and fix overexposure. Based on
-    Section 3.4 from [Common Diffusion Noise Schedules and Sample Steps are
-    Flawed](https://huggingface.co/papers/2305.08891).
-
-    Args:
-        noise_cfg (`torch.Tensor`):
-            The predicted noise tensor for the guided diffusion process.
-        noise_pred_text (`torch.Tensor`):
-            The predicted noise tensor for the text-guided diffusion process.
-        guidance_rescale (`float`, *optional*, defaults to 0.0):
-            A rescale factor applied to the noise predictions.
-
-    Returns:
-        noise_cfg (`torch.Tensor`): The rescaled noise prediction tensor.
+    """
+    Rescale `noise_cfg` according to `guidance_rescale`. Based on findings of [Common Diffusion Noise Schedules and
+    Sample Steps are Flawed](https://arxiv.org/pdf/2305.08891.pdf). See Section 3.4
     """
     std_text = noise_pred_text.std(dim=list(range(1, noise_pred_text.ndim)), keepdim=True)
     std_cfg = noise_cfg.std(dim=list(range(1, noise_cfg.ndim)), keepdim=True)
@@ -104,7 +83,7 @@ def retrieve_timesteps(
     sigmas: Optional[List[float]] = None,
     **kwargs,
 ):
-    r"""
+    """
     Calls the scheduler's `set_timesteps` method and retrieves timesteps from the scheduler after the call. Handles
     custom timesteps. Any kwargs will be supplied to `scheduler.set_timesteps`.
 
@@ -178,7 +157,6 @@ class LDM3DPipelineOutput(BaseOutput):
 
 
 class StableDiffusionLDM3DPipeline(
-    DeprecatedPipelineMixin,
     DiffusionPipeline,
     StableDiffusionMixin,
     TextualInversionLoaderMixin,
@@ -186,8 +164,6 @@ class StableDiffusionLDM3DPipeline(
     StableDiffusionLoraLoaderMixin,
     FromSingleFileMixin,
 ):
-    _last_supported_version = "0.33.1"
-
     r"""
     Pipeline for text-to-image and 3D generation using LDM3D.
 
@@ -215,8 +191,8 @@ class StableDiffusionLDM3DPipeline(
             [`DDIMScheduler`], [`LMSDiscreteScheduler`], or [`PNDMScheduler`].
         safety_checker ([`StableDiffusionSafetyChecker`]):
             Classification module that estimates whether generated images could be considered offensive or harmful.
-            Please refer to the [model card](https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5) for
-            more details about a model's potential harms.
+            Please refer to the [model card](https://huggingface.co/runwayml/stable-diffusion-v1-5) for more details
+            about a model's potential harms.
         feature_extractor ([`~transformers.CLIPImageProcessor`]):
             A `CLIPImageProcessor` to extract features from generated images; used as inputs to the `safety_checker`.
     """
@@ -266,7 +242,7 @@ class StableDiffusionLDM3DPipeline(
             feature_extractor=feature_extractor,
             image_encoder=image_encoder,
         )
-        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1) if getattr(self, "vae", None) else 8
+        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
         self.image_processor = VaeImageProcessorLDM3D(vae_scale_factor=self.vae_scale_factor)
         self.register_to_config(requires_safety_checker=requires_safety_checker)
 
@@ -576,7 +552,7 @@ class StableDiffusionLDM3DPipeline(
     def prepare_extra_step_kwargs(self, generator, eta):
         # prepare extra kwargs for the scheduler step, since not all schedulers have the same signature
         # eta (η) is only used with the DDIMScheduler, it will be ignored for other schedulers.
-        # eta corresponds to η in DDIM paper: https://huggingface.co/papers/2010.02502
+        # eta corresponds to η in DDIM paper: https://arxiv.org/abs/2010.02502
         # and should be between [0, 1]
 
         accepts_eta = "eta" in set(inspect.signature(self.scheduler.step).parameters.keys())
@@ -726,7 +702,7 @@ class StableDiffusionLDM3DPipeline(
         return self._clip_skip
 
     # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
-    # of the Imagen paper: https://huggingface.co/papers/2205.11487 . `guidance_scale = 1`
+    # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
     # corresponds to doing no classifier free guidance.
     @property
     def do_classifier_free_guidance(self):
@@ -803,8 +779,8 @@ class StableDiffusionLDM3DPipeline(
             num_images_per_prompt (`int`, *optional*, defaults to 1):
                 The number of images to generate per prompt.
             eta (`float`, *optional*, defaults to 0.0):
-                Corresponds to parameter eta (η) from the [DDIM](https://huggingface.co/papers/2010.02502) paper. Only
-                applies to the [`~schedulers.DDIMScheduler`], and is ignored in other schedulers.
+                Corresponds to parameter eta (η) from the [DDIM](https://arxiv.org/abs/2010.02502) paper. Only applies
+                to the [`~schedulers.DDIMScheduler`], and is ignored in other schedulers.
             generator (`torch.Generator` or `List[torch.Generator]`, *optional*):
                 A [`torch.Generator`](https://pytorch.org/docs/stable/generated/torch.Generator.html) to make
                 generation deterministic.
@@ -991,7 +967,7 @@ class StableDiffusionLDM3DPipeline(
                     noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
                 if self.do_classifier_free_guidance and self.guidance_rescale > 0.0:
-                    # Based on 3.4. in https://huggingface.co/papers/2305.08891
+                    # Based on 3.4. in https://arxiv.org/pdf/2305.08891.pdf
                     noise_pred = rescale_noise_cfg(noise_pred, noise_pred_text, guidance_rescale=self.guidance_rescale)
 
                 # compute the previous noisy sample x_t -> x_t-1
@@ -1013,9 +989,6 @@ class StableDiffusionLDM3DPipeline(
                     if callback is not None and i % callback_steps == 0:
                         step_idx = i // getattr(self.scheduler, "order", 1)
                         callback(step_idx, t, latents)
-
-                if XLA_AVAILABLE:
-                    xm.mark_step()
 
         if not output_type == "latent":
             image = self.vae.decode(latents / self.vae.config.scaling_factor, return_dict=False)[0]

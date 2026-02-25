@@ -1,4 +1,4 @@
-# Copyright 2025 TSAIL Team and The HuggingFace Team. All rights reserved.
+# Copyright 2024 TSAIL Team and The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -80,15 +80,14 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
     the convergence order guarantee. Empirically, sampling by DPM-Solver with only 20 steps can generate high-quality
     samples, and it can generate quite good samples even in only 10 steps.
 
-    For more details, see the original paper: https://huggingface.co/papers/2206.00927 and
-    https://huggingface.co/papers/2211.01095
+    For more details, see the original paper: https://arxiv.org/abs/2206.00927 and https://arxiv.org/abs/2211.01095
 
     Currently, we support the multistep DPM-Solver for both noise prediction models and data prediction models. We
     recommend to use `solver_order=2` for guided sampling, and `solver_order=3` for unconditional sampling.
 
-    We also support the "dynamic thresholding" method in Imagen (https://huggingface.co/papers/2205.11487). For
-    pixel-space diffusion models, you can set both `algorithm_type="dpmsolver++"` and `thresholding=True` to use the
-    dynamic thresholding. Note that the thresholding method is unsuitable for latent-space diffusion models (such as
+    We also support the "dynamic thresholding" method in Imagen (https://arxiv.org/abs/2205.11487). For pixel-space
+    diffusion models, you can set both `algorithm_type="dpmsolver++"` and `thresholding=True` to use the dynamic
+    thresholding. Note that the thresholding method is unsuitable for latent-space diffusion models (such as
     stable-diffusion).
 
     [`~ConfigMixin`] takes care of storing all config attributes that are passed in the scheduler's `__init__`
@@ -96,8 +95,7 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
     [`SchedulerMixin`] provides general loading and saving functionality via the [`SchedulerMixin.save_pretrained`] and
     [`~SchedulerMixin.from_pretrained`] functions.
 
-    For more details, see the original paper: https://huggingface.co/papers/2206.00927 and
-    https://huggingface.co/papers/2211.01095
+    For more details, see the original paper: https://arxiv.org/abs/2206.00927 and https://arxiv.org/abs/2211.01095
 
     Args:
         num_train_timesteps (`int`): number of diffusion steps used to train the model.
@@ -115,21 +113,21 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
             indicates whether the model predicts the noise (epsilon), or the data / `x0`. One of `epsilon`, `sample`,
             or `v-prediction`.
         thresholding (`bool`, default `False`):
-            whether to use the "dynamic thresholding" method (introduced by Imagen,
-            https://huggingface.co/papers/2205.11487). For pixel-space diffusion models, you can set both
-            `algorithm_type=dpmsolver++` and `thresholding=True` to use the dynamic thresholding. Note that the
-            thresholding method is unsuitable for latent-space diffusion models (such as stable-diffusion).
+            whether to use the "dynamic thresholding" method (introduced by Imagen, https://arxiv.org/abs/2205.11487).
+            For pixel-space diffusion models, you can set both `algorithm_type=dpmsolver++` and `thresholding=True` to
+            use the dynamic thresholding. Note that the thresholding method is unsuitable for latent-space diffusion
+            models (such as stable-diffusion).
         dynamic_thresholding_ratio (`float`, default `0.995`):
             the ratio for the dynamic thresholding method. Default is `0.995`, the same as Imagen
-            (https://huggingface.co/papers/2205.11487).
+            (https://arxiv.org/abs/2205.11487).
         sample_max_value (`float`, default `1.0`):
             the threshold value for dynamic thresholding. Valid only when `thresholding=True` and
             `algorithm_type="dpmsolver++`.
         algorithm_type (`str`, default `dpmsolver++`):
             the algorithm type for the solver. Either `dpmsolver` or `dpmsolver++`. The `dpmsolver` type implements the
-            algorithms in https://huggingface.co/papers/2206.00927, and the `dpmsolver++` type implements the
-            algorithms in https://huggingface.co/papers/2211.01095. We recommend to use `dpmsolver++` with
-            `solver_order=2` for guided sampling (e.g. stable-diffusion).
+            algorithms in https://arxiv.org/abs/2206.00927, and the `dpmsolver++` type implements the algorithms in
+            https://arxiv.org/abs/2211.01095. We recommend to use `dpmsolver++` with `solver_order=2` for guided
+            sampling (e.g. stable-diffusion).
         solver_type (`str`, default `midpoint`):
             the solver type for the second-order solver. Either `midpoint` or `heun`. The solver type slightly affects
             the sample quality, especially for small number of steps. We empirically find that `midpoint` solvers are
@@ -299,7 +297,7 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
                 )
 
             if self.config.thresholding:
-                # Dynamic thresholding in https://huggingface.co/papers/2205.11487
+                # Dynamic thresholding in https://arxiv.org/abs/2205.11487
                 dynamic_max_val = jnp.percentile(
                     jnp.abs(x0_pred), self.config.dynamic_thresholding_ratio, axis=tuple(range(1, x0_pred.ndim))
                 )
@@ -337,7 +335,7 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
         """
         One step for the first-order DPM-Solver (equivalent to DDIM).
 
-        See https://huggingface.co/papers/2206.00927 for the detailed derivation.
+        See https://arxiv.org/abs/2206.00927 for the detailed derivation.
 
         Args:
             model_output (`jnp.ndarray`): direct output from learned diffusion model.
@@ -392,7 +390,7 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
         r0 = h_0 / h
         D0, D1 = m0, (1.0 / r0) * (m0 - m1)
         if self.config.algorithm_type == "dpmsolver++":
-            # See https://huggingface.co/papers/2211.01095 for detailed derivations
+            # See https://arxiv.org/abs/2211.01095 for detailed derivations
             if self.config.solver_type == "midpoint":
                 x_t = (
                     (sigma_t / sigma_s0) * sample
@@ -406,7 +404,7 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
                     + (alpha_t * ((jnp.exp(-h) - 1.0) / h + 1.0)) * D1
                 )
         elif self.config.algorithm_type == "dpmsolver":
-            # See https://huggingface.co/papers/2206.00927 for detailed derivations
+            # See https://arxiv.org/abs/2206.00927 for detailed derivations
             if self.config.solver_type == "midpoint":
                 x_t = (
                     (alpha_t / alpha_s0) * sample
@@ -460,7 +458,7 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
         D1 = D1_0 + (r0 / (r0 + r1)) * (D1_0 - D1_1)
         D2 = (1.0 / (r0 + r1)) * (D1_0 - D1_1)
         if self.config.algorithm_type == "dpmsolver++":
-            # See https://huggingface.co/papers/2206.00927 for detailed derivations
+            # See https://arxiv.org/abs/2206.00927 for detailed derivations
             x_t = (
                 (sigma_t / sigma_s0) * sample
                 - (alpha_t * (jnp.exp(-h) - 1.0)) * D0
@@ -468,7 +466,7 @@ class FlaxDPMSolverMultistepScheduler(FlaxSchedulerMixin, ConfigMixin):
                 - (alpha_t * ((jnp.exp(-h) - 1.0 + h) / h**2 - 0.5)) * D2
             )
         elif self.config.algorithm_type == "dpmsolver":
-            # See https://huggingface.co/papers/2206.00927 for detailed derivations
+            # See https://arxiv.org/abs/2206.00927 for detailed derivations
             x_t = (
                 (alpha_t / alpha_s0) * sample
                 - (sigma_t * (jnp.exp(h) - 1.0)) * D0

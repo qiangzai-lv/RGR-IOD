@@ -8,12 +8,10 @@ from diffusers import ControlNetModel, StableDiffusionControlNetInpaintPipeline
 from diffusers.loaders.single_file_utils import _extract_repo_id_and_weights_name
 from diffusers.utils import load_image
 from diffusers.utils.testing_utils import (
-    backend_empty_cache,
     enable_full_determinism,
     numpy_cosine_similarity_distance,
-    require_torch_accelerator,
+    require_torch_gpu,
     slow,
-    torch_device,
 )
 
 from .single_file_testing_utils import (
@@ -28,22 +26,22 @@ enable_full_determinism()
 
 
 @slow
-@require_torch_accelerator
+@require_torch_gpu
 class StableDiffusionControlNetInpaintPipelineSingleFileSlowTests(unittest.TestCase, SDSingleFileTesterMixin):
     pipeline_class = StableDiffusionControlNetInpaintPipeline
     ckpt_path = "https://huggingface.co/botp/stable-diffusion-v1-5-inpainting/blob/main/sd-v1-5-inpainting.ckpt"
     original_config = "https://raw.githubusercontent.com/runwayml/stable-diffusion/main/configs/stable-diffusion/v1-inpainting-inference.yaml"
-    repo_id = "stable-diffusion-v1-5/stable-diffusion-inpainting"
+    repo_id = "botp/stable-diffusion-v1-5-inpainting"
 
     def setUp(self):
         super().setUp()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def tearDown(self):
         super().tearDown()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def get_inputs(self):
         control_image = load_image(
@@ -73,11 +71,11 @@ class StableDiffusionControlNetInpaintPipelineSingleFileSlowTests(unittest.TestC
         controlnet = ControlNetModel.from_pretrained("lllyasviel/control_v11p_sd15_canny")
         pipe = self.pipeline_class.from_pretrained(self.repo_id, controlnet=controlnet, safety_checker=None)
         pipe.unet.set_default_attn_processor()
-        pipe.enable_model_cpu_offload(device=torch_device)
+        pipe.enable_model_cpu_offload()
 
         pipe_sf = self.pipeline_class.from_single_file(self.ckpt_path, controlnet=controlnet, safety_checker=None)
         pipe_sf.unet.set_default_attn_processor()
-        pipe_sf.enable_model_cpu_offload(device=torch_device)
+        pipe_sf.enable_model_cpu_offload()
 
         inputs = self.get_inputs()
         output = pipe(**inputs).images[0]

@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 HuggingFace Inc.
+# Copyright 2024 HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,11 +22,9 @@ from diffusers import (
     ControlNetModel,
 )
 from diffusers.utils.testing_utils import (
-    backend_empty_cache,
     enable_full_determinism,
-    require_torch_accelerator,
+    require_torch_gpu,
     slow,
-    torch_device,
 )
 
 
@@ -34,7 +32,7 @@ enable_full_determinism()
 
 
 @slow
-@require_torch_accelerator
+@require_torch_gpu
 class ControlNetModelSingleFileTests(unittest.TestCase):
     model_class = ControlNetModel
     ckpt_path = "https://huggingface.co/lllyasviel/ControlNet-v1-1/blob/main/control_v11p_sd15_canny.pth"
@@ -43,12 +41,12 @@ class ControlNetModelSingleFileTests(unittest.TestCase):
     def setUp(self):
         super().setUp()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def tearDown(self):
         super().tearDown()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def test_single_file_components(self):
         model = self.model_class.from_pretrained(self.repo_id)
@@ -58,9 +56,9 @@ class ControlNetModelSingleFileTests(unittest.TestCase):
         for param_name, param_value in model_single_file.config.items():
             if param_name in PARAMS_TO_IGNORE:
                 continue
-            assert model.config[param_name] == param_value, (
-                f"{param_name} differs between single file loading and pretrained loading"
-            )
+            assert (
+                model.config[param_name] == param_value
+            ), f"{param_name} differs between single file loading and pretrained loading"
 
     def test_single_file_arguments(self):
         model_default = self.model_class.from_single_file(self.ckpt_path)

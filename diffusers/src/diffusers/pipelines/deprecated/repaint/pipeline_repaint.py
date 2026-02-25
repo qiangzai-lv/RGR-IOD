@@ -1,4 +1,4 @@
-# Copyright 2025 ETH Zurich Computer Vision Lab and The HuggingFace Team. All rights reserved.
+# Copyright 2024 ETH Zurich Computer Vision Lab and The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -91,7 +91,7 @@ class RePaintPipeline(DiffusionPipeline):
     scheduler: RePaintScheduler
     model_cpu_offload_seq = "unet"
 
-    def __init__(self, unet: UNet2DModel, scheduler: RePaintScheduler):
+    def __init__(self, unet, scheduler):
         super().__init__()
         self.register_modules(unet=unet, scheduler=scheduler)
 
@@ -124,11 +124,10 @@ class RePaintPipeline(DiffusionPipeline):
                 DDIM and 1.0 is the DDPM scheduler.
             jump_length (`int`, *optional*, defaults to 10):
                 The number of steps taken forward in time before going backward in time for a single jump ("j" in
-                RePaint paper). Take a look at Figure 9 and 10 in the
-                [paper](https://huggingface.co/papers/2201.09865).
+                RePaint paper). Take a look at Figure 9 and 10 in the [paper](https://arxiv.org/pdf/2201.09865.pdf).
             jump_n_sample (`int`, *optional*, defaults to 10):
                 The number of times to make a forward time jump for a given chosen time sample. Take a look at Figure 9
-                and 10 in the [paper](https://huggingface.co/papers/2201.09865).
+                and 10 in the [paper](https://arxiv.org/pdf/2201.09865.pdf).
             generator (`torch.Generator`, *optional*):
                 A [`torch.Generator`](https://pytorch.org/docs/stable/generated/torch.Generator.html) to make
                 generation deterministic.

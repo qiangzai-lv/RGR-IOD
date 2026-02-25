@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 HuggingFace Inc.
+# Copyright 2024 HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -83,13 +83,6 @@ class DiTTransformer2DModelTests(ModelTesterMixin, unittest.TestCase):
         init_dict, _ = self.prepare_init_args_and_inputs_for_common()
         model = Transformer2DModel.from_config(init_dict)
         assert isinstance(model, DiTTransformer2DModel)
-
-    def test_gradient_checkpointing_is_applied(self):
-        expected_set = {"DiTTransformer2DModel"}
-        super().test_gradient_checkpointing_is_applied(expected_set=expected_set)
-
-    def test_effective_gradient_checkpointing(self):
-        super().test_effective_gradient_checkpointing(loss_tolerance=1e-4)
 
     def test_correct_class_remapping_from_pretrained_config(self):
         config = DiTTransformer2DModel.load_config("facebook/DiT-XL-2-256", subfolder="transformer")

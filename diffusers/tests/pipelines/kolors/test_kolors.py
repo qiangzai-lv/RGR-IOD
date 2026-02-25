@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 HuggingFace Inc.
+# Copyright 2024 HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -47,9 +47,6 @@ class KolorsPipelineFastTests(PipelineTesterMixin, unittest.TestCase):
     image_latents_params = TEXT_TO_IMAGE_IMAGE_PARAMS
     callback_cfg_params = TEXT_TO_IMAGE_CALLBACK_CFG_PARAMS.union({"add_text_embeds", "add_time_ids"})
 
-    supports_dduf = False
-    test_layerwise_casting = True
-
     def get_dummy_components(self, time_cond_proj_dim=None):
         torch.manual_seed(0)
         unet = UNet2DConditionModel(
@@ -89,9 +86,7 @@ class KolorsPipelineFastTests(PipelineTesterMixin, unittest.TestCase):
             sample_size=128,
         )
         torch.manual_seed(0)
-        text_encoder = ChatGLMModel.from_pretrained(
-            "hf-internal-testing/tiny-random-chatglm3-6b", torch_dtype=torch.float32
-        )
+        text_encoder = ChatGLMModel.from_pretrained("hf-internal-testing/tiny-random-chatglm3-6b")
         tokenizer = ChatGLMTokenizer.from_pretrained("hf-internal-testing/tiny-random-chatglm3-6b")
 
         components = {
@@ -145,4 +140,4 @@ class KolorsPipelineFastTests(PipelineTesterMixin, unittest.TestCase):
         super().test_save_load_float16(expected_max_diff=2e-1)
 
     def test_inference_batch_single_identical(self):
-        self._test_inference_batch_single_identical(expected_max_diff=5e-3)
+        self._test_inference_batch_single_identical(expected_max_diff=5e-4)

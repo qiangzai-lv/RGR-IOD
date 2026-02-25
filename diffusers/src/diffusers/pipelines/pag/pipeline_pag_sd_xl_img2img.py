@@ -1,4 +1,4 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
+# Copyright 2024 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -49,7 +49,7 @@ from ...utils import (
     scale_lora_layers,
     unscale_lora_layers,
 )
-from ...utils.torch_utils import empty_device_cache, randn_tensor
+from ...utils.torch_utils import randn_tensor
 from ..pipeline_utils import DiffusionPipeline, StableDiffusionMixin
 from ..stable_diffusion_xl.pipeline_output import StableDiffusionXLPipelineOutput
 from .pag_utils import PAGMixin
@@ -92,21 +92,9 @@ EXAMPLE_DOC_STRING = """
 
 # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.rescale_noise_cfg
 def rescale_noise_cfg(noise_cfg, noise_pred_text, guidance_rescale=0.0):
-    r"""
-    Rescales `noise_cfg` tensor based on `guidance_rescale` to improve image quality and fix overexposure. Based on
-    Section 3.4 from [Common Diffusion Noise Schedules and Sample Steps are
-    Flawed](https://huggingface.co/papers/2305.08891).
-
-    Args:
-        noise_cfg (`torch.Tensor`):
-            The predicted noise tensor for the guided diffusion process.
-        noise_pred_text (`torch.Tensor`):
-            The predicted noise tensor for the text-guided diffusion process.
-        guidance_rescale (`float`, *optional*, defaults to 0.0):
-            A rescale factor applied to the noise predictions.
-
-    Returns:
-        noise_cfg (`torch.Tensor`): The rescaled noise prediction tensor.
+    """
+    Rescale `noise_cfg` according to `guidance_rescale`. Based on findings of [Common Diffusion Noise Schedules and
+    Sample Steps are Flawed](https://arxiv.org/pdf/2305.08891.pdf). See Section 3.4
     """
     std_text = noise_pred_text.std(dim=list(range(1, noise_pred_text.ndim)), keepdim=True)
     std_cfg = noise_cfg.std(dim=list(range(1, noise_cfg.ndim)), keepdim=True)
@@ -140,7 +128,7 @@ def retrieve_timesteps(
     sigmas: Optional[List[float]] = None,
     **kwargs,
 ):
-    r"""
+    """
     Calls the scheduler's `set_timesteps` method and retrieves timesteps from the scheduler after the call. Handles
     custom timesteps. Any kwargs will be supplied to `scheduler.set_timesteps`.
 
@@ -298,7 +286,7 @@ class StableDiffusionXLPAGImg2ImgPipeline(
         )
         self.register_to_config(force_zeros_for_empty_prompt=force_zeros_for_empty_prompt)
         self.register_to_config(requires_aesthetics_score=requires_aesthetics_score)
-        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1) if getattr(self, "vae", None) else 8
+        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
 
         add_watermarker = add_watermarker if add_watermarker is not None else is_invisible_watermark_available()
@@ -436,9 +424,7 @@ class StableDiffusionXLPAGImg2ImgPipeline(
                 prompt_embeds = text_encoder(text_input_ids.to(device), output_hidden_states=True)
 
                 # We are only ALWAYS interested in the pooled output of the final text encoder
-                if pooled_prompt_embeds is None and prompt_embeds[0].ndim == 2:
-                    pooled_prompt_embeds = prompt_embeds[0]
-
+                pooled_prompt_embeds = prompt_embeds[0]
                 if clip_skip is None:
                     prompt_embeds = prompt_embeds.hidden_states[-2]
                 else:
@@ -497,10 +483,8 @@ class StableDiffusionXLPAGImg2ImgPipeline(
                     uncond_input.input_ids.to(device),
                     output_hidden_states=True,
                 )
-
                 # We are only ALWAYS interested in the pooled output of the final text encoder
-                if negative_pooled_prompt_embeds is None and negative_prompt_embeds[0].ndim == 2:
-                    negative_pooled_prompt_embeds = negative_prompt_embeds[0]
+                negative_pooled_prompt_embeds = negative_prompt_embeds[0]
                 negative_prompt_embeds = negative_prompt_embeds.hidden_states[-2]
 
                 negative_prompt_embeds_list.append(negative_prompt_embeds)
@@ -553,7 +537,7 @@ class StableDiffusionXLPAGImg2ImgPipeline(
     def prepare_extra_step_kwargs(self, generator, eta):
         # prepare extra kwargs for the scheduler step, since not all schedulers have the same signature
         # eta (η) is only used with the DDIMScheduler, it will be ignored for other schedulers.
-        # eta corresponds to η in DDIM paper: https://huggingface.co/papers/2010.02502
+        # eta corresponds to η in DDIM paper: https://arxiv.org/abs/2010.02502
         # and should be between [0, 1]
 
         accepts_eta = "eta" in set(inspect.signature(self.scheduler.step).parameters.keys())
@@ -716,7 +700,7 @@ class StableDiffusionXLPAGImg2ImgPipeline(
         # Offload text encoder if `enable_model_cpu_offload` was enabled
         if hasattr(self, "final_offload_hook") and self.final_offload_hook is not None:
             self.text_encoder_2.to("cpu")
-            empty_device_cache()
+            torch.cuda.empty_cache()
 
         image = image.to(device=device, dtype=dtype)
 
@@ -970,7 +954,7 @@ class StableDiffusionXLPAGImg2ImgPipeline(
         return self._clip_skip
 
     # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
-    # of the Imagen paper: https://huggingface.co/papers/2205.11487 . `guidance_scale = 1`
+    # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
     # corresponds to doing no classifier free guidance.
     @property
     def do_classifier_free_guidance(self):
@@ -1088,11 +1072,11 @@ class StableDiffusionXLPAGImg2ImgPipeline(
                 forms a part of a "Mixture of Denoisers" multi-pipeline setup, as elaborated in [**Refine Image
                 Quality**](https://huggingface.co/docs/diffusers/using-diffusers/sdxl#refine-image-quality).
             guidance_scale (`float`, *optional*, defaults to 7.5):
-                Guidance scale as defined in [Classifier-Free Diffusion
-                Guidance](https://huggingface.co/papers/2207.12598). `guidance_scale` is defined as `w` of equation 2.
-                of [Imagen Paper](https://huggingface.co/papers/2205.11487). Guidance scale is enabled by setting
-                `guidance_scale > 1`. Higher guidance scale encourages to generate images that are closely linked to
-                the text `prompt`, usually at the expense of lower image quality.
+                Guidance scale as defined in [Classifier-Free Diffusion Guidance](https://arxiv.org/abs/2207.12598).
+                `guidance_scale` is defined as `w` of equation 2. of [Imagen
+                Paper](https://arxiv.org/pdf/2205.11487.pdf). Guidance scale is enabled by setting `guidance_scale >
+                1`. Higher guidance scale encourages to generate images that are closely linked to the text `prompt`,
+                usually at the expense of lower image quality.
             negative_prompt (`str` or `List[str]`, *optional*):
                 The prompt or prompts not to guide the image generation. If not defined, one has to pass
                 `negative_prompt_embeds` instead. Ignored when not using guidance (i.e., ignored if `guidance_scale` is
@@ -1103,8 +1087,8 @@ class StableDiffusionXLPAGImg2ImgPipeline(
             num_images_per_prompt (`int`, *optional*, defaults to 1):
                 The number of images to generate per prompt.
             eta (`float`, *optional*, defaults to 0.0):
-                Corresponds to parameter eta (η) in the DDIM paper: https://huggingface.co/papers/2010.02502. Only
-                applies to [`schedulers.DDIMScheduler`], will be ignored for others.
+                Corresponds to parameter eta (η) in the DDIM paper: https://arxiv.org/abs/2010.02502. Only applies to
+                [`schedulers.DDIMScheduler`], will be ignored for others.
             generator (`torch.Generator` or `List[torch.Generator]`, *optional*):
                 One or a list of [torch generator(s)](https://pytorch.org/docs/stable/generated/torch.Generator.html)
                 to make generation deterministic.
@@ -1144,10 +1128,9 @@ class StableDiffusionXLPAGImg2ImgPipeline(
                 [diffusers.models.attention_processor](https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/attention_processor.py).
             guidance_rescale (`float`, *optional*, defaults to 0.0):
                 Guidance rescale factor proposed by [Common Diffusion Noise Schedules and Sample Steps are
-                Flawed](https://huggingface.co/papers/2305.08891) `guidance_scale` is defined as `φ` in equation 16. of
-                [Common Diffusion Noise Schedules and Sample Steps are
-                Flawed](https://huggingface.co/papers/2305.08891). Guidance rescale factor should fix overexposure when
-                using zero terminal SNR.
+                Flawed](https://arxiv.org/pdf/2305.08891.pdf) `guidance_scale` is defined as `φ` in equation 16. of
+                [Common Diffusion Noise Schedules and Sample Steps are Flawed](https://arxiv.org/pdf/2305.08891.pdf).
+                Guidance rescale factor should fix overexposure when using zero terminal SNR.
             original_size (`Tuple[int]`, *optional*, defaults to (1024, 1024)):
                 If `original_size` is not the same as `target_size` the image will appear to be down- or upsampled.
                 `original_size` defaults to `(height, width)` if not specified. Part of SDXL's micro-conditioning as
@@ -1454,15 +1437,15 @@ class StableDiffusionXLPAGImg2ImgPipeline(
 
                 # perform guidance
                 if self.do_perturbed_attention_guidance:
-                    noise_pred, noise_pred_text = self._apply_perturbed_attention_guidance(
-                        noise_pred, self.do_classifier_free_guidance, self.guidance_scale, t, True
+                    noise_pred = self._apply_perturbed_attention_guidance(
+                        noise_pred, self.do_classifier_free_guidance, self.guidance_scale, t
                     )
                 elif self.do_classifier_free_guidance:
                     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
                     noise_pred = noise_pred_uncond + self.guidance_scale * (noise_pred_text - noise_pred_uncond)
 
                 if self.do_classifier_free_guidance and self.guidance_rescale > 0.0:
-                    # Based on 3.4. in https://huggingface.co/papers/2305.08891
+                    # Based on 3.4. in https://arxiv.org/pdf/2305.08891.pdf
                     noise_pred = rescale_noise_cfg(noise_pred, noise_pred_text, guidance_rescale=self.guidance_rescale)
 
                 # compute the previous noisy sample x_t -> x_t-1

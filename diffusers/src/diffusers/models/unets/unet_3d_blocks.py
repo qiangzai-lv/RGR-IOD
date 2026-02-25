@@ -1,4 +1,4 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
+# Copyright 2024 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ from typing import Any, Dict, Optional, Tuple, Union
 import torch
 from torch import nn
 
-from ...utils import deprecate, logging
+from ...utils import deprecate, is_torch_version, logging
 from ...utils.torch_utils import apply_freeu
 from ..attention import Attention
 from ..resnet import (
@@ -1078,14 +1078,31 @@ class UNetMidBlockSpatioTemporal(nn.Module):
         )
 
         for attn, resnet in zip(self.attentions, self.resnets[1:]):
-            if torch.is_grad_enabled() and self.gradient_checkpointing:
+            if self.training and self.gradient_checkpointing:  # TODO
+
+                def create_custom_forward(module, return_dict=None):
+                    def custom_forward(*inputs):
+                        if return_dict is not None:
+                            return module(*inputs, return_dict=return_dict)
+                        else:
+                            return module(*inputs)
+
+                    return custom_forward
+
+                ckpt_kwargs: Dict[str, Any] = {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
                 hidden_states = attn(
                     hidden_states,
                     encoder_hidden_states=encoder_hidden_states,
                     image_only_indicator=image_only_indicator,
                     return_dict=False,
                 )[0]
-                hidden_states = self._gradient_checkpointing_func(resnet, hidden_states, temb, image_only_indicator)
+                hidden_states = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(resnet),
+                    hidden_states,
+                    temb,
+                    image_only_indicator,
+                    **ckpt_kwargs,
+                )
             else:
                 hidden_states = attn(
                     hidden_states,
@@ -1093,7 +1110,11 @@ class UNetMidBlockSpatioTemporal(nn.Module):
                     image_only_indicator=image_only_indicator,
                     return_dict=False,
                 )[0]
-                hidden_states = resnet(hidden_states, temb, image_only_indicator=image_only_indicator)
+                hidden_states = resnet(
+                    hidden_states,
+                    temb,
+                    image_only_indicator=image_only_indicator,
+                )
 
         return hidden_states
 
@@ -1147,10 +1168,35 @@ class DownBlockSpatioTemporal(nn.Module):
     ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, ...]]:
         output_states = ()
         for resnet in self.resnets:
-            if torch.is_grad_enabled() and self.gradient_checkpointing:
-                hidden_states = self._gradient_checkpointing_func(resnet, hidden_states, temb, image_only_indicator)
+            if self.training and self.gradient_checkpointing:
+
+                def create_custom_forward(module):
+                    def custom_forward(*inputs):
+                        return module(*inputs)
+
+                    return custom_forward
+
+                if is_torch_version(">=", "1.11.0"):
+                    hidden_states = torch.utils.checkpoint.checkpoint(
+                        create_custom_forward(resnet),
+                        hidden_states,
+                        temb,
+                        image_only_indicator,
+                        use_reentrant=False,
+                    )
+                else:
+                    hidden_states = torch.utils.checkpoint.checkpoint(
+                        create_custom_forward(resnet),
+                        hidden_states,
+                        temb,
+                        image_only_indicator,
+                    )
             else:
-                hidden_states = resnet(hidden_states, temb, image_only_indicator=image_only_indicator)
+                hidden_states = resnet(
+                    hidden_states,
+                    temb,
+                    image_only_indicator=image_only_indicator,
+                )
 
             output_states = output_states + (hidden_states,)
 
@@ -1235,8 +1281,25 @@ class CrossAttnDownBlockSpatioTemporal(nn.Module):
 
         blocks = list(zip(self.resnets, self.attentions))
         for resnet, attn in blocks:
-            if torch.is_grad_enabled() and self.gradient_checkpointing:
-                hidden_states = self._gradient_checkpointing_func(resnet, hidden_states, temb, image_only_indicator)
+            if self.training and self.gradient_checkpointing:  # TODO
+
+                def create_custom_forward(module, return_dict=None):
+                    def custom_forward(*inputs):
+                        if return_dict is not None:
+                            return module(*inputs, return_dict=return_dict)
+                        else:
+                            return module(*inputs)
+
+                    return custom_forward
+
+                ckpt_kwargs: Dict[str, Any] = {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
+                hidden_states = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(resnet),
+                    hidden_states,
+                    temb,
+                    image_only_indicator,
+                    **ckpt_kwargs,
+                )
 
                 hidden_states = attn(
                     hidden_states,
@@ -1245,7 +1308,11 @@ class CrossAttnDownBlockSpatioTemporal(nn.Module):
                     return_dict=False,
                 )[0]
             else:
-                hidden_states = resnet(hidden_states, temb, image_only_indicator=image_only_indicator)
+                hidden_states = resnet(
+                    hidden_states,
+                    temb,
+                    image_only_indicator=image_only_indicator,
+                )
                 hidden_states = attn(
                     hidden_states,
                     encoder_hidden_states=encoder_hidden_states,
@@ -1308,7 +1375,6 @@ class UpBlockSpatioTemporal(nn.Module):
         res_hidden_states_tuple: Tuple[torch.Tensor, ...],
         temb: Optional[torch.Tensor] = None,
         image_only_indicator: Optional[torch.Tensor] = None,
-        upsample_size: Optional[int] = None,
     ) -> torch.Tensor:
         for resnet in self.resnets:
             # pop res hidden states
@@ -1317,14 +1383,39 @@ class UpBlockSpatioTemporal(nn.Module):
 
             hidden_states = torch.cat([hidden_states, res_hidden_states], dim=1)
 
-            if torch.is_grad_enabled() and self.gradient_checkpointing:
-                hidden_states = self._gradient_checkpointing_func(resnet, hidden_states, temb, image_only_indicator)
+            if self.training and self.gradient_checkpointing:
+
+                def create_custom_forward(module):
+                    def custom_forward(*inputs):
+                        return module(*inputs)
+
+                    return custom_forward
+
+                if is_torch_version(">=", "1.11.0"):
+                    hidden_states = torch.utils.checkpoint.checkpoint(
+                        create_custom_forward(resnet),
+                        hidden_states,
+                        temb,
+                        image_only_indicator,
+                        use_reentrant=False,
+                    )
+                else:
+                    hidden_states = torch.utils.checkpoint.checkpoint(
+                        create_custom_forward(resnet),
+                        hidden_states,
+                        temb,
+                        image_only_indicator,
+                    )
             else:
-                hidden_states = resnet(hidden_states, temb, image_only_indicator=image_only_indicator)
+                hidden_states = resnet(
+                    hidden_states,
+                    temb,
+                    image_only_indicator=image_only_indicator,
+                )
 
         if self.upsamplers is not None:
             for upsampler in self.upsamplers:
-                hidden_states = upsampler(hidden_states, upsample_size)
+                hidden_states = upsampler(hidden_states)
 
         return hidden_states
 
@@ -1394,7 +1485,6 @@ class CrossAttnUpBlockSpatioTemporal(nn.Module):
         temb: Optional[torch.Tensor] = None,
         encoder_hidden_states: Optional[torch.Tensor] = None,
         image_only_indicator: Optional[torch.Tensor] = None,
-        upsample_size: Optional[int] = None,
     ) -> torch.Tensor:
         for resnet, attn in zip(self.resnets, self.attentions):
             # pop res hidden states
@@ -1403,8 +1493,25 @@ class CrossAttnUpBlockSpatioTemporal(nn.Module):
 
             hidden_states = torch.cat([hidden_states, res_hidden_states], dim=1)
 
-            if torch.is_grad_enabled() and self.gradient_checkpointing:
-                hidden_states = self._gradient_checkpointing_func(resnet, hidden_states, temb, image_only_indicator)
+            if self.training and self.gradient_checkpointing:  # TODO
+
+                def create_custom_forward(module, return_dict=None):
+                    def custom_forward(*inputs):
+                        if return_dict is not None:
+                            return module(*inputs, return_dict=return_dict)
+                        else:
+                            return module(*inputs)
+
+                    return custom_forward
+
+                ckpt_kwargs: Dict[str, Any] = {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
+                hidden_states = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(resnet),
+                    hidden_states,
+                    temb,
+                    image_only_indicator,
+                    **ckpt_kwargs,
+                )
                 hidden_states = attn(
                     hidden_states,
                     encoder_hidden_states=encoder_hidden_states,
@@ -1412,7 +1519,11 @@ class CrossAttnUpBlockSpatioTemporal(nn.Module):
                     return_dict=False,
                 )[0]
             else:
-                hidden_states = resnet(hidden_states, temb, image_only_indicator=image_only_indicator)
+                hidden_states = resnet(
+                    hidden_states,
+                    temb,
+                    image_only_indicator=image_only_indicator,
+                )
                 hidden_states = attn(
                     hidden_states,
                     encoder_hidden_states=encoder_hidden_states,
@@ -1422,6 +1533,6 @@ class CrossAttnUpBlockSpatioTemporal(nn.Module):
 
         if self.upsamplers is not None:
             for upsampler in self.upsamplers:
-                hidden_states = upsampler(hidden_states, upsample_size)
+                hidden_states = upsampler(hidden_states)
 
         return hidden_states

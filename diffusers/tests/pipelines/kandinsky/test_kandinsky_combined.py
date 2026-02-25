@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 HuggingFace Inc.
+# Copyright 2024 HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ import unittest
 import numpy as np
 
 from diffusers import KandinskyCombinedPipeline, KandinskyImg2ImgCombinedPipeline, KandinskyInpaintCombinedPipeline
-from diffusers.utils.testing_utils import enable_full_determinism, require_torch_accelerator, torch_device
+from diffusers.utils.testing_utils import enable_full_determinism, require_torch_gpu, torch_device
 
 from ..test_pipelines_common import PipelineTesterMixin
 from .test_kandinsky import Dummies
@@ -51,8 +51,6 @@ class KandinskyPipelineCombinedFastTests(PipelineTesterMixin, unittest.TestCase)
         "return_dict",
     ]
     test_xformers_attention = True
-
-    supports_dduf = False
 
     def get_dummy_components(self):
         dummy = Dummies()
@@ -98,14 +96,14 @@ class KandinskyPipelineCombinedFastTests(PipelineTesterMixin, unittest.TestCase)
 
         expected_slice = np.array([0.2893, 0.1464, 0.4603, 0.3529, 0.4612, 0.7701, 0.4027, 0.3051, 0.5155])
 
-        assert np.abs(image_slice.flatten() - expected_slice).max() < 1e-2, (
-            f" expected_slice {expected_slice}, but got {image_slice.flatten()}"
-        )
-        assert np.abs(image_from_tuple_slice.flatten() - expected_slice).max() < 1e-2, (
-            f" expected_slice {expected_slice}, but got {image_from_tuple_slice.flatten()}"
-        )
+        assert (
+            np.abs(image_slice.flatten() - expected_slice).max() < 1e-2
+        ), f" expected_slice {expected_slice}, but got {image_slice.flatten()}"
+        assert (
+            np.abs(image_from_tuple_slice.flatten() - expected_slice).max() < 1e-2
+        ), f" expected_slice {expected_slice}, but got {image_from_tuple_slice.flatten()}"
 
-    @require_torch_accelerator
+    @require_torch_gpu
     def test_offloads(self):
         pipes = []
         components = self.get_dummy_components()
@@ -114,12 +112,12 @@ class KandinskyPipelineCombinedFastTests(PipelineTesterMixin, unittest.TestCase)
 
         components = self.get_dummy_components()
         sd_pipe = self.pipeline_class(**components)
-        sd_pipe.enable_model_cpu_offload(device=torch_device)
+        sd_pipe.enable_model_cpu_offload()
         pipes.append(sd_pipe)
 
         components = self.get_dummy_components()
         sd_pipe = self.pipeline_class(**components)
-        sd_pipe.enable_sequential_cpu_offload(device=torch_device)
+        sd_pipe.enable_sequential_cpu_offload()
         pipes.append(sd_pipe)
 
         image_slices = []
@@ -161,8 +159,6 @@ class KandinskyPipelineImg2ImgCombinedFastTests(PipelineTesterMixin, unittest.Te
         "return_dict",
     ]
     test_xformers_attention = False
-
-    supports_dduf = False
 
     def get_dummy_components(self):
         dummy = Img2ImgDummies()
@@ -206,14 +202,14 @@ class KandinskyPipelineImg2ImgCombinedFastTests(PipelineTesterMixin, unittest.Te
 
         expected_slice = np.array([0.4852, 0.4136, 0.4539, 0.4781, 0.4680, 0.5217, 0.4973, 0.4089, 0.4977])
 
-        assert np.abs(image_slice.flatten() - expected_slice).max() < 1e-2, (
-            f" expected_slice {expected_slice}, but got {image_slice.flatten()}"
-        )
-        assert np.abs(image_from_tuple_slice.flatten() - expected_slice).max() < 1e-2, (
-            f" expected_slice {expected_slice}, but got {image_from_tuple_slice.flatten()}"
-        )
+        assert (
+            np.abs(image_slice.flatten() - expected_slice).max() < 1e-2
+        ), f" expected_slice {expected_slice}, but got {image_slice.flatten()}"
+        assert (
+            np.abs(image_from_tuple_slice.flatten() - expected_slice).max() < 1e-2
+        ), f" expected_slice {expected_slice}, but got {image_from_tuple_slice.flatten()}"
 
-    @require_torch_accelerator
+    @require_torch_gpu
     def test_offloads(self):
         pipes = []
         components = self.get_dummy_components()
@@ -222,12 +218,12 @@ class KandinskyPipelineImg2ImgCombinedFastTests(PipelineTesterMixin, unittest.Te
 
         components = self.get_dummy_components()
         sd_pipe = self.pipeline_class(**components)
-        sd_pipe.enable_model_cpu_offload(device=torch_device)
+        sd_pipe.enable_model_cpu_offload()
         pipes.append(sd_pipe)
 
         components = self.get_dummy_components()
         sd_pipe = self.pipeline_class(**components)
-        sd_pipe.enable_sequential_cpu_offload(device=torch_device)
+        sd_pipe.enable_sequential_cpu_offload()
         pipes.append(sd_pipe)
 
         image_slices = []
@@ -273,8 +269,6 @@ class KandinskyPipelineInpaintCombinedFastTests(PipelineTesterMixin, unittest.Te
     ]
     test_xformers_attention = False
 
-    supports_dduf = False
-
     def get_dummy_components(self):
         dummy = InpaintDummies()
         prior_dummy = PriorDummies()
@@ -314,18 +308,20 @@ class KandinskyPipelineInpaintCombinedFastTests(PipelineTesterMixin, unittest.Te
 
         image_from_tuple_slice = image_from_tuple[0, -3:, -3:, -1]
 
+        print(image_from_tuple_slice)
+
         assert image.shape == (1, 64, 64, 3)
 
         expected_slice = np.array([0.0320, 0.0860, 0.4013, 0.0518, 0.2484, 0.5847, 0.4411, 0.2321, 0.4593])
 
-        assert np.abs(image_slice.flatten() - expected_slice).max() < 1e-2, (
-            f" expected_slice {expected_slice}, but got {image_slice.flatten()}"
-        )
-        assert np.abs(image_from_tuple_slice.flatten() - expected_slice).max() < 1e-2, (
-            f" expected_slice {expected_slice}, but got {image_from_tuple_slice.flatten()}"
-        )
+        assert (
+            np.abs(image_slice.flatten() - expected_slice).max() < 1e-2
+        ), f" expected_slice {expected_slice}, but got {image_slice.flatten()}"
+        assert (
+            np.abs(image_from_tuple_slice.flatten() - expected_slice).max() < 1e-2
+        ), f" expected_slice {expected_slice}, but got {image_from_tuple_slice.flatten()}"
 
-    @require_torch_accelerator
+    @require_torch_gpu
     def test_offloads(self):
         pipes = []
         components = self.get_dummy_components()
@@ -334,12 +330,12 @@ class KandinskyPipelineInpaintCombinedFastTests(PipelineTesterMixin, unittest.Te
 
         components = self.get_dummy_components()
         sd_pipe = self.pipeline_class(**components)
-        sd_pipe.enable_model_cpu_offload(device=torch_device)
+        sd_pipe.enable_model_cpu_offload()
         pipes.append(sd_pipe)
 
         components = self.get_dummy_components()
         sd_pipe = self.pipeline_class(**components)
-        sd_pipe.enable_sequential_cpu_offload(device=torch_device)
+        sd_pipe.enable_sequential_cpu_offload()
         pipes.append(sd_pipe)
 
         image_slices = []

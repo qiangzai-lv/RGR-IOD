@@ -8,11 +8,9 @@ from diffusers import (
 )
 from diffusers.utils import load_image
 from diffusers.utils.testing_utils import (
-    backend_empty_cache,
     enable_full_determinism,
-    require_torch_accelerator,
+    require_torch_gpu,
     slow,
-    torch_device,
 )
 
 from .single_file_testing_utils import SDSingleFileTesterMixin
@@ -22,26 +20,24 @@ enable_full_determinism()
 
 
 @slow
-@require_torch_accelerator
+@require_torch_gpu
 class StableDiffusionImg2ImgPipelineSingleFileSlowTests(unittest.TestCase, SDSingleFileTesterMixin):
     pipeline_class = StableDiffusionImg2ImgPipeline
-    ckpt_path = (
-        "https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5/blob/main/v1-5-pruned-emaonly.safetensors"
-    )
+    ckpt_path = "https://huggingface.co/Jiali/stable-diffusion-1.5/blob/main/v1-5-pruned-emaonly.safetensors"
     original_config = (
         "https://raw.githubusercontent.com/CompVis/stable-diffusion/main/configs/stable-diffusion/v1-inference.yaml"
     )
-    repo_id = "stable-diffusion-v1-5/stable-diffusion-v1-5"
+    repo_id = "Jiali/stable-diffusion-1.5"
 
     def setUp(self):
         super().setUp()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def tearDown(self):
         super().tearDown()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def get_inputs(self, device, generator_device="cpu", dtype=torch.float32, seed=0):
         generator = torch.Generator(device=generator_device).manual_seed(seed)
@@ -65,7 +61,7 @@ class StableDiffusionImg2ImgPipelineSingleFileSlowTests(unittest.TestCase, SDSin
 
 
 @slow
-@require_torch_accelerator
+@require_torch_gpu
 class StableDiffusion21Img2ImgPipelineSingleFileSlowTests(unittest.TestCase, SDSingleFileTesterMixin):
     pipeline_class = StableDiffusionImg2ImgPipeline
     ckpt_path = "https://huggingface.co/stabilityai/stable-diffusion-2-1/blob/main/v2-1_768-ema-pruned.safetensors"
@@ -75,12 +71,12 @@ class StableDiffusion21Img2ImgPipelineSingleFileSlowTests(unittest.TestCase, SDS
     def setUp(self):
         super().setUp()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def tearDown(self):
         super().tearDown()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def get_inputs(self, device, generator_device="cpu", dtype=torch.float32, seed=0):
         generator = torch.Generator(device=generator_device).manual_seed(seed)

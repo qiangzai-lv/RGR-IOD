@@ -1,4 +1,4 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
+# Copyright 2024 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,21 +24,13 @@ from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection
 from ...image_processor import PipelineImageInput
 from ...models import AutoencoderKLTemporalDecoder, UNetSpatioTemporalConditionModel
 from ...schedulers import EulerDiscreteScheduler
-from ...utils import BaseOutput, is_torch_xla_available, logging, replace_example_docstring
+from ...utils import BaseOutput, logging, replace_example_docstring
 from ...utils.torch_utils import is_compiled_module, randn_tensor
 from ...video_processor import VideoProcessor
 from ..pipeline_utils import DiffusionPipeline
 
 
-if is_torch_xla_available():
-    import torch_xla.core.xla_model as xm
-
-    XLA_AVAILABLE = True
-else:
-    XLA_AVAILABLE = False
-
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
-
 
 EXAMPLE_DOC_STRING = """
     Examples:
@@ -79,7 +71,7 @@ def retrieve_timesteps(
     sigmas: Optional[List[float]] = None,
     **kwargs,
 ):
-    r"""
+    """
     Calls the scheduler's `set_timesteps` method and retrieves timesteps from the scheduler after the call. Handles
     custom timesteps. Any kwargs will be supplied to `scheduler.set_timesteps`.
 
@@ -185,7 +177,7 @@ class StableVideoDiffusionPipeline(DiffusionPipeline):
             scheduler=scheduler,
             feature_extractor=feature_extractor,
         )
-        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1) if getattr(self, "vae", None) else 8
+        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
         self.video_processor = VideoProcessor(do_resize=True, vae_scale_factor=self.vae_scale_factor)
 
     def _encode_image(
@@ -369,7 +361,7 @@ class StableVideoDiffusionPipeline(DiffusionPipeline):
         return self._guidance_scale
 
     # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
-    # of the Imagen paper: https://huggingface.co/papers/2205.11487 . `guidance_scale = 1`
+    # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
     # corresponds to doing no classifier free guidance.
     @property
     def do_classifier_free_guidance(self):
@@ -495,7 +487,7 @@ class StableVideoDiffusionPipeline(DiffusionPipeline):
             batch_size = image.shape[0]
         device = self._execution_device
         # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
-        # of the Imagen paper: https://huggingface.co/papers/2205.11487 . `guidance_scale = 1`
+        # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
         # corresponds to doing no classifier free guidance.
         self._guidance_scale = max_guidance_scale
 
@@ -607,9 +599,6 @@ class StableVideoDiffusionPipeline(DiffusionPipeline):
 
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
                     progress_bar.update()
-
-                if XLA_AVAILABLE:
-                    xm.mark_step()
 
         if not output_type == "latent":
             # cast back to fp16 if needed

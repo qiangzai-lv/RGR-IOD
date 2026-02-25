@@ -1,4 +1,4 @@
-# Copyright 2025 Kakao Brain and The HuggingFace Team. All rights reserved.
+# Copyright 2024 Kakao Brain and The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,23 +22,16 @@ from transformers.models.clip.modeling_clip import CLIPTextModelOutput
 
 from ...models import PriorTransformer, UNet2DConditionModel, UNet2DModel
 from ...schedulers import UnCLIPScheduler
-from ...utils import is_torch_xla_available, logging
+from ...utils import logging
 from ...utils.torch_utils import randn_tensor
-from ..pipeline_utils import DeprecatedPipelineMixin, DiffusionPipeline, ImagePipelineOutput
+from ..pipeline_utils import DiffusionPipeline, ImagePipelineOutput
 from .text_proj import UnCLIPTextProjModel
 
-
-if is_torch_xla_available():
-    import torch_xla.core.xla_model as xm
-
-    XLA_AVAILABLE = True
-else:
-    XLA_AVAILABLE = False
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
-class UnCLIPPipeline(DeprecatedPipelineMixin, DiffusionPipeline):
+class UnCLIPPipeline(DiffusionPipeline):
     """
     Pipeline for text-to-image generation using unCLIP.
 
@@ -69,7 +62,6 @@ class UnCLIPPipeline(DeprecatedPipelineMixin, DiffusionPipeline):
 
     """
 
-    _last_supported_version = "0.33.1"
     _exclude_from_cpu_offload = ["prior"]
 
     prior: PriorTransformer
@@ -481,9 +473,6 @@ class UnCLIPPipeline(DeprecatedPipelineMixin, DiffusionPipeline):
             super_res_latents = self.super_res_scheduler.step(
                 noise_pred, t, super_res_latents, prev_timestep=prev_timestep, generator=generator
             ).prev_sample
-
-            if XLA_AVAILABLE:
-                xm.mark_step()
 
         image = super_res_latents
         # done super res

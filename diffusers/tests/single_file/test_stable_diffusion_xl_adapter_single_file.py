@@ -11,12 +11,10 @@ from diffusers import (
 from diffusers.loaders.single_file_utils import _extract_repo_id_and_weights_name
 from diffusers.utils import load_image
 from diffusers.utils.testing_utils import (
-    backend_empty_cache,
     enable_full_determinism,
     numpy_cosine_similarity_distance,
-    require_torch_accelerator,
+    require_torch_gpu,
     slow,
-    torch_device,
 )
 
 from .single_file_testing_utils import (
@@ -31,7 +29,7 @@ enable_full_determinism()
 
 
 @slow
-@require_torch_accelerator
+@require_torch_gpu
 class StableDiffusionXLAdapterPipelineSingleFileSlowTests(unittest.TestCase, SDXLSingleFileTesterMixin):
     pipeline_class = StableDiffusionXLAdapterPipeline
     ckpt_path = "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/sd_xl_base_1.0.safetensors"
@@ -43,12 +41,12 @@ class StableDiffusionXLAdapterPipelineSingleFileSlowTests(unittest.TestCase, SDX
     def setUp(self):
         super().setUp()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def tearDown(self):
         super().tearDown()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def get_inputs(self):
         prompt = "toy"
@@ -76,7 +74,7 @@ class StableDiffusionXLAdapterPipelineSingleFileSlowTests(unittest.TestCase, SDX
             torch_dtype=torch.float16,
             safety_checker=None,
         )
-        pipe_single_file.enable_model_cpu_offload(device=torch_device)
+        pipe_single_file.enable_model_cpu_offload()
         pipe_single_file.set_progress_bar_config(disable=None)
 
         inputs = self.get_inputs()
@@ -88,7 +86,7 @@ class StableDiffusionXLAdapterPipelineSingleFileSlowTests(unittest.TestCase, SDX
             torch_dtype=torch.float16,
             safety_checker=None,
         )
-        pipe.enable_model_cpu_offload(device=torch_device)
+        pipe.enable_model_cpu_offload()
 
         inputs = self.get_inputs()
         images = pipe(**inputs).images[0]

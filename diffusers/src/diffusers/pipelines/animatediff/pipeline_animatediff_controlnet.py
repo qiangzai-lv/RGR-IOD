@@ -1,4 +1,4 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
+# Copyright 2024 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,36 +20,22 @@ import torch.nn.functional as F
 from transformers import CLIPImageProcessor, CLIPTextModel, CLIPTokenizer, CLIPVisionModelWithProjection
 
 from ...image_processor import PipelineImageInput
-from ...loaders import FromSingleFileMixin, IPAdapterMixin, StableDiffusionLoraLoaderMixin, TextualInversionLoaderMixin
-from ...models import (
-    AutoencoderKL,
-    ControlNetModel,
-    ImageProjection,
-    MultiControlNetModel,
-    UNet2DConditionModel,
-    UNetMotionModel,
-)
+from ...loaders import IPAdapterMixin, StableDiffusionLoraLoaderMixin, TextualInversionLoaderMixin
+from ...models import AutoencoderKL, ControlNetModel, ImageProjection, UNet2DConditionModel, UNetMotionModel
 from ...models.lora import adjust_lora_scale_text_encoder
 from ...models.unets.unet_motion_model import MotionAdapter
 from ...schedulers import KarrasDiffusionSchedulers
-from ...utils import USE_PEFT_BACKEND, is_torch_xla_available, logging, scale_lora_layers, unscale_lora_layers
+from ...utils import USE_PEFT_BACKEND, logging, scale_lora_layers, unscale_lora_layers
 from ...utils.torch_utils import is_compiled_module, randn_tensor
 from ...video_processor import VideoProcessor
+from ..controlnet.multicontrolnet import MultiControlNetModel
 from ..free_init_utils import FreeInitMixin
 from ..free_noise_utils import AnimateDiffFreeNoiseMixin
 from ..pipeline_utils import DiffusionPipeline, StableDiffusionMixin
 from .pipeline_output import AnimateDiffPipelineOutput
 
 
-if is_torch_xla_available():
-    import torch_xla.core.xla_model as xm
-
-    XLA_AVAILABLE = True
-else:
-    XLA_AVAILABLE = False
-
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
-
 
 EXAMPLE_DOC_STRING = """
     Examples:
@@ -125,7 +111,6 @@ class AnimateDiffControlNetPipeline(
     StableDiffusionLoraLoaderMixin,
     FreeInitMixin,
     AnimateDiffFreeNoiseMixin,
-    FromSingleFileMixin,
 ):
     r"""
     Pipeline for text-to-video generation with ControlNet guidance.
@@ -189,7 +174,7 @@ class AnimateDiffControlNetPipeline(
             feature_extractor=feature_extractor,
             image_encoder=image_encoder,
         )
-        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1) if getattr(self, "vae", None) else 8
+        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
         self.video_processor = VideoProcessor(vae_scale_factor=self.vae_scale_factor)
         self.control_video_processor = VideoProcessor(
             vae_scale_factor=self.vae_scale_factor, do_convert_rgb=True, do_normalize=False
@@ -472,7 +457,7 @@ class AnimateDiffControlNetPipeline(
     def prepare_extra_step_kwargs(self, generator, eta):
         # prepare extra kwargs for the scheduler step, since not all schedulers have the same signature
         # eta (η) is only used with the DDIMScheduler, it will be ignored for other schedulers.
-        # eta corresponds to η in DDIM paper: https://huggingface.co/papers/2010.02502
+        # eta corresponds to η in DDIM paper: https://arxiv.org/abs/2010.02502
         # and should be between [0, 1]
 
         accepts_eta = "eta" in set(inspect.signature(self.scheduler.step).parameters.keys())
@@ -630,7 +615,7 @@ class AnimateDiffControlNetPipeline(
     def prepare_latents(
         self, batch_size, num_channels_latents, num_frames, height, width, dtype, device, generator, latents=None
     ):
-        # If FreeNoise is enabled, generate latents as described in Equation (7) of [FreeNoise](https://huggingface.co/papers/2310.15169)
+        # If FreeNoise is enabled, generate latents as described in Equation (7) of [FreeNoise](https://arxiv.org/abs/2310.15169)
         if self.free_noise_enabled:
             latents = self._prepare_latents_free_noise(
                 batch_size, num_channels_latents, num_frames, height, width, dtype, device, generator, latents
@@ -700,7 +685,7 @@ class AnimateDiffControlNetPipeline(
         return self._clip_skip
 
     # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
-    # of the Imagen paper: https://huggingface.co/papers/2205.11487 . `guidance_scale = 1`
+    # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
     # corresponds to doing no classifier free guidance.
     @property
     def do_classifier_free_guidance(self):
@@ -772,8 +757,8 @@ class AnimateDiffControlNetPipeline(
                 The prompt or prompts to guide what to not include in image generation. If not defined, you need to
                 pass `negative_prompt_embeds` instead. Ignored when not using guidance (`guidance_scale < 1`).
             eta (`float`, *optional*, defaults to 0.0):
-                Corresponds to parameter eta (η) from the [DDIM](https://huggingface.co/papers/2010.02502) paper. Only
-                applies to the [`~schedulers.DDIMScheduler`], and is ignored in other schedulers.
+                Corresponds to parameter eta (η) from the [DDIM](https://arxiv.org/abs/2010.02502) paper. Only applies
+                to the [`~schedulers.DDIMScheduler`], and is ignored in other schedulers.
             generator (`torch.Generator` or `List[torch.Generator]`, *optional*):
                 A [`torch.Generator`](https://pytorch.org/docs/stable/generated/torch.Generator.html) to make
                 generation deterministic.
@@ -1098,9 +1083,6 @@ class AnimateDiffControlNetPipeline(
                     # call the callback, if provided
                     if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
                         progress_bar.update()
-
-                    if XLA_AVAILABLE:
-                        xm.mark_step()
 
         # 9. Post processing
         if output_type == "latent":

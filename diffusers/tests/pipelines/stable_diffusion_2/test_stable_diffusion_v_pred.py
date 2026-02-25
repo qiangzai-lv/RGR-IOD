@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 HuggingFace Inc.
+# Copyright 2024 HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -31,15 +31,10 @@ from diffusers import (
     UNet2DConditionModel,
 )
 from diffusers.utils.testing_utils import (
-    backend_empty_cache,
-    backend_max_memory_allocated,
-    backend_reset_max_memory_allocated,
-    backend_reset_peak_memory_stats,
     enable_full_determinism,
     load_numpy,
     numpy_cosine_similarity_distance,
-    require_accelerator,
-    require_torch_accelerator,
+    require_torch_gpu,
     slow,
     torch_device,
 )
@@ -53,13 +48,13 @@ class StableDiffusion2VPredictionPipelineFastTests(unittest.TestCase):
         # clean up the VRAM before each test
         super().setUp()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def tearDown(self):
         # clean up the VRAM after each test
         super().tearDown()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     @property
     def dummy_cond_unet(self):
@@ -218,7 +213,7 @@ class StableDiffusion2VPredictionPipelineFastTests(unittest.TestCase):
         assert np.abs(image_slice.flatten() - expected_slice).max() < 1e-2
         assert np.abs(image_from_tuple_slice.flatten() - expected_slice).max() < 1e-2
 
-    @require_accelerator
+    @unittest.skipIf(torch_device != "cuda", "This test requires a GPU")
     def test_stable_diffusion_v_pred_fp16(self):
         """Test that stable diffusion v-prediction works with fp16"""
         unet = self.dummy_cond_unet
@@ -262,19 +257,19 @@ class StableDiffusion2VPredictionPipelineFastTests(unittest.TestCase):
 
 
 @slow
-@require_torch_accelerator
+@require_torch_gpu
 class StableDiffusion2VPredictionPipelineIntegrationTests(unittest.TestCase):
     def setUp(self):
         # clean up the VRAM before each test
         super().setUp()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def tearDown(self):
         # clean up the VRAM after each test
         super().tearDown()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def test_stable_diffusion_v_pred_default(self):
         sd_pipe = StableDiffusionPipeline.from_pretrained("stabilityai/stable-diffusion-2")
@@ -361,7 +356,7 @@ class StableDiffusion2VPredictionPipelineIntegrationTests(unittest.TestCase):
         assert np.abs(image_slice.flatten() - expected_slice).max() < 1e-2
 
     def test_stable_diffusion_attention_slicing_v_pred(self):
-        backend_reset_peak_memory_stats(torch_device)
+        torch.cuda.reset_peak_memory_stats()
         model_id = "stabilityai/stable-diffusion-2"
         pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float16)
         pipe.to(torch_device)
@@ -377,8 +372,8 @@ class StableDiffusion2VPredictionPipelineIntegrationTests(unittest.TestCase):
         )
         image_chunked = output_chunked.images
 
-        mem_bytes = backend_max_memory_allocated(torch_device)
-        backend_reset_peak_memory_stats(torch_device)
+        mem_bytes = torch.cuda.max_memory_allocated()
+        torch.cuda.reset_peak_memory_stats()
         # make sure that less than 5.5 GB is allocated
         assert mem_bytes < 5.5 * 10**9
 
@@ -389,7 +384,7 @@ class StableDiffusion2VPredictionPipelineIntegrationTests(unittest.TestCase):
         image = output.images
 
         # make sure that more than 3.0 GB is allocated
-        mem_bytes = backend_max_memory_allocated(torch_device)
+        mem_bytes = torch.cuda.max_memory_allocated()
         assert mem_bytes > 3 * 10**9
         max_diff = numpy_cosine_similarity_distance(image.flatten(), image_chunked.flatten())
         assert max_diff < 1e-3
@@ -425,7 +420,7 @@ class StableDiffusion2VPredictionPipelineIntegrationTests(unittest.TestCase):
         pipe.scheduler = DDIMScheduler.from_config(
             pipe.scheduler.config, timestep_spacing="trailing", rescale_betas_zero_snr=True
         )
-        pipe.enable_model_cpu_offload(device=torch_device)
+        pipe.enable_model_cpu_offload()
         pipe.set_progress_bar_config(disable=None)
 
         prompt = "A lion in galaxies, spirals, nebulae, stars, smoke, iridescent, intricate detail, octane render, 8k"
@@ -470,7 +465,7 @@ class StableDiffusion2VPredictionPipelineIntegrationTests(unittest.TestCase):
 
         pipe = StableDiffusionPipeline.from_single_file(filename, torch_dtype=torch.float16)
         pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
-        pipe.enable_model_cpu_offload(device=torch_device)
+        pipe.enable_model_cpu_offload()
 
         image_out = pipe("test", num_inference_steps=1, output_type="np").images[0]
 
@@ -534,20 +529,20 @@ class StableDiffusion2VPredictionPipelineIntegrationTests(unittest.TestCase):
         assert 2 * low_cpu_mem_usage_time < normal_load_time
 
     def test_stable_diffusion_pipeline_with_sequential_cpu_offloading_v_pred(self):
-        backend_empty_cache(torch_device)
-        backend_reset_max_memory_allocated(torch_device)
-        backend_reset_peak_memory_stats(torch_device)
+        torch.cuda.empty_cache()
+        torch.cuda.reset_max_memory_allocated()
+        torch.cuda.reset_peak_memory_stats()
 
         pipeline_id = "stabilityai/stable-diffusion-2"
         prompt = "Andromeda galaxy in a bottle"
 
         pipeline = StableDiffusionPipeline.from_pretrained(pipeline_id, torch_dtype=torch.float16)
         pipeline.enable_attention_slicing(1)
-        pipeline.enable_sequential_cpu_offload(device=torch_device)
+        pipeline.enable_sequential_cpu_offload()
 
         generator = torch.manual_seed(0)
         _ = pipeline(prompt, generator=generator, num_inference_steps=5)
 
-        mem_bytes = backend_max_memory_allocated(torch_device)
+        mem_bytes = torch.cuda.max_memory_allocated()
         # make sure that less than 2.8 GB is allocated
         assert mem_bytes < 2.8 * 10**9

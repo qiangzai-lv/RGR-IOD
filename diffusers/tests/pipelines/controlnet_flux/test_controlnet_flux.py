@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 HuggingFace Inc and The InstantX Team.
+# Copyright 2024 HuggingFace Inc and The InstantX Team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ import unittest
 
 import numpy as np
 import torch
-from huggingface_hub import hf_hub_download
 from transformers import CLIPTextConfig, CLIPTextModel, CLIPTokenizer, T5EncoderModel, T5TokenizerFast
 
 from diffusers import (
@@ -30,28 +29,24 @@ from diffusers import (
 from diffusers.models import FluxControlNetModel
 from diffusers.utils import load_image
 from diffusers.utils.testing_utils import (
-    backend_empty_cache,
     enable_full_determinism,
-    nightly,
-    numpy_cosine_similarity_distance,
-    require_big_accelerator,
+    require_torch_gpu,
+    slow,
     torch_device,
 )
 from diffusers.utils.torch_utils import randn_tensor
 
-from ..test_pipelines_common import FluxIPAdapterTesterMixin, PipelineTesterMixin
+from ..test_pipelines_common import PipelineTesterMixin
 
 
 enable_full_determinism()
 
 
-class FluxControlNetPipelineFastTests(unittest.TestCase, PipelineTesterMixin, FluxIPAdapterTesterMixin):
+class FluxControlNetPipelineFastTests(unittest.TestCase, PipelineTesterMixin):
     pipeline_class = FluxControlNetPipeline
 
     params = frozenset(["prompt", "height", "width", "guidance_scale", "prompt_embeds", "pooled_prompt_embeds"])
     batch_params = frozenset(["prompt"])
-    test_layerwise_casting = True
-    test_group_offloading = True
 
     def get_dummy_components(self):
         torch.manual_seed(0)
@@ -128,8 +123,6 @@ class FluxControlNetPipelineFastTests(unittest.TestCase, PipelineTesterMixin, Fl
             "transformer": transformer,
             "vae": vae,
             "controlnet": controlnet,
-            "image_encoder": None,
-            "feature_extractor": None,
         }
 
     def get_dummy_inputs(self, device, seed=0):
@@ -174,102 +167,67 @@ class FluxControlNetPipelineFastTests(unittest.TestCase, PipelineTesterMixin, Fl
         assert image.shape == (1, 32, 32, 3)
 
         expected_slice = np.array(
-            [0.47387695, 0.63134766, 0.5605469, 0.61621094, 0.7207031, 0.7089844, 0.70410156, 0.6113281, 0.64160156]
+            [0.7348633, 0.41333008, 0.6621094, 0.5444336, 0.47607422, 0.5859375, 0.44677734, 0.4506836, 0.40454102]
         )
 
-        assert np.abs(image_slice.flatten() - expected_slice).max() < 1e-2, (
-            f"Expected: {expected_slice}, got: {image_slice.flatten()}"
-        )
+        assert (
+            np.abs(image_slice.flatten() - expected_slice).max() < 1e-2
+        ), f"Expected: {expected_slice}, got: {image_slice.flatten()}"
 
     @unittest.skip("xFormersAttnProcessor does not work with SD3 Joint Attention")
     def test_xformers_attention_forwardGenerator_pass(self):
         pass
 
-    def test_flux_image_output_shape(self):
-        pipe = self.pipeline_class(**self.get_dummy_components()).to(torch_device)
-        inputs = self.get_dummy_inputs(torch_device)
 
-        height_width_pairs = [(32, 32), (72, 56)]
-        for height, width in height_width_pairs:
-            expected_height = height - height % (pipe.vae_scale_factor * 2)
-            expected_width = width - width % (pipe.vae_scale_factor * 2)
-
-            inputs.update(
-                {
-                    "control_image": randn_tensor(
-                        (1, 3, height, width),
-                        device=torch_device,
-                        dtype=torch.float16,
-                    )
-                }
-            )
-            image = pipe(**inputs).images[0]
-            output_height, output_width, _ = image.shape
-            assert (output_height, output_width) == (expected_height, expected_width)
-
-
-@nightly
-@require_big_accelerator
+@slow
+@require_torch_gpu
 class FluxControlNetPipelineSlowTests(unittest.TestCase):
     pipeline_class = FluxControlNetPipeline
 
     def setUp(self):
         super().setUp()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def tearDown(self):
         super().tearDown()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def test_canny(self):
         controlnet = FluxControlNetModel.from_pretrained(
             "InstantX/FLUX.1-dev-Controlnet-Canny-alpha", torch_dtype=torch.bfloat16
         )
         pipe = FluxControlNetPipeline.from_pretrained(
-            "black-forest-labs/FLUX.1-dev",
-            text_encoder=None,
-            text_encoder_2=None,
-            controlnet=controlnet,
-            torch_dtype=torch.bfloat16,
-        ).to(torch_device)
+            "black-forest-labs/FLUX.1-dev", controlnet=controlnet, torch_dtype=torch.bfloat16
+        )
+        pipe.enable_model_cpu_offload()
         pipe.set_progress_bar_config(disable=None)
 
         generator = torch.Generator(device="cpu").manual_seed(0)
+        prompt = "A girl in city, 25 years old, cool, futuristic"
         control_image = load_image(
             "https://huggingface.co/InstantX/FLUX.1-dev-Controlnet-Canny-alpha/resolve/main/canny.jpg"
-        ).resize((512, 512))
-
-        prompt_embeds = torch.load(
-            hf_hub_download(repo_id="diffusers/test-slices", repo_type="dataset", filename="flux/prompt_embeds.pt")
-        ).to(torch_device)
-        pooled_prompt_embeds = torch.load(
-            hf_hub_download(
-                repo_id="diffusers/test-slices", repo_type="dataset", filename="flux/pooled_prompt_embeds.pt"
-            )
-        ).to(torch_device)
+        )
 
         output = pipe(
-            prompt_embeds=prompt_embeds,
-            pooled_prompt_embeds=pooled_prompt_embeds,
+            prompt,
             control_image=control_image,
             controlnet_conditioning_scale=0.6,
             num_inference_steps=2,
             guidance_scale=3.5,
-            max_sequence_length=256,
             output_type="np",
-            height=512,
-            width=512,
             generator=generator,
         )
 
         image = output.images[0]
 
-        assert image.shape == (512, 512, 3)
+        assert image.shape == (1024, 1024, 3)
 
         original_image = image[-3:, -3:, -1].flatten()
 
-        expected_image = np.array([0.2734, 0.2852, 0.2852, 0.2734, 0.2754, 0.2891, 0.2617, 0.2637, 0.2773])
+        expected_image = np.array(
+            [0.33007812, 0.33984375, 0.33984375, 0.328125, 0.34179688, 0.33984375, 0.30859375, 0.3203125, 0.3203125]
+        )
 
-        assert numpy_cosine_similarity_distance(original_image.flatten(), expected_image) < 1e-2
+        assert np.abs(original_image.flatten() - expected_image).max() < 1e-2

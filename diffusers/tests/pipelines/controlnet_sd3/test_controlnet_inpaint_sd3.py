@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 HuggingFace Inc.
+# Copyright 2024 HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -137,8 +137,6 @@ class StableDiffusion3ControlInpaintNetPipelineFastTests(unittest.TestCase, Pipe
             "transformer": transformer,
             "vae": vae,
             "controlnet": controlnet,
-            "image_encoder": None,
-            "feature_extractor": None,
         }
 
     def get_dummy_inputs(self, device, seed=0):
@@ -194,9 +192,9 @@ class StableDiffusion3ControlInpaintNetPipelineFastTests(unittest.TestCase, Pipe
             [0.51708984, 0.7421875, 0.4580078, 0.6435547, 0.65625, 0.43603516, 0.5151367, 0.65722656, 0.60839844]
         )
 
-        assert np.abs(image_slice.flatten() - expected_slice).max() < 1e-2, (
-            f"Expected: {expected_slice}, got: {image_slice.flatten()}"
-        )
+        assert (
+            np.abs(image_slice.flatten() - expected_slice).max() < 1e-2
+        ), f"Expected: {expected_slice}, got: {image_slice.flatten()}"
 
     @unittest.skip("xFormersAttnProcessor does not work with SD3 Joint Attention")
     def test_xformers_attention_forwardGenerator_pass(self):

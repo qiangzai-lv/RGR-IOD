@@ -1,4 +1,4 @@
-# Copyright 2025 UC Berkeley Team and The HuggingFace Team. All rights reserved.
+# Copyright 2024 UC Berkeley Team and The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -92,7 +92,7 @@ def betas_for_alpha_bar(
 # Copied from diffusers.schedulers.scheduling_ddim.rescale_zero_terminal_snr
 def rescale_zero_terminal_snr(betas):
     """
-    Rescales betas to have zero terminal SNR Based on https://huggingface.co/papers/2305.08891 (Algorithm 1)
+    Rescales betas to have zero terminal SNR Based on https://arxiv.org/pdf/2305.08891.pdf (Algorithm 1)
 
 
     Args:
@@ -142,7 +142,7 @@ class DDPMScheduler(SchedulerMixin, ConfigMixin):
             The final `beta` value.
         beta_schedule (`str`, defaults to `"linear"`):
             The beta schedule, a mapping from a beta range to a sequence of betas for stepping the model. Choose from
-            `linear`, `scaled_linear`, `squaredcos_cap_v2`, or `sigmoid`.
+            `linear`, `scaled_linear`, or `squaredcos_cap_v2`.
         trained_betas (`np.ndarray`, *optional*):
             An array of betas to pass directly to the constructor without using `beta_start` and `beta_end`.
         variance_type (`str`, defaults to `"fixed_small"`):
@@ -279,7 +279,8 @@ class DDPMScheduler(SchedulerMixin, ConfigMixin):
 
             if timesteps[0] >= self.config.num_train_timesteps:
                 raise ValueError(
-                    f"`timesteps` must start before `self.config.train_timesteps`: {self.config.num_train_timesteps}."
+                    f"`timesteps` must start before `self.config.train_timesteps`:"
+                    f" {self.config.num_train_timesteps}."
                 )
 
             timesteps = np.array(timesteps, dtype=np.int64)
@@ -295,7 +296,7 @@ class DDPMScheduler(SchedulerMixin, ConfigMixin):
             self.num_inference_steps = num_inference_steps
             self.custom_timesteps = False
 
-            # "linspace", "leading", "trailing" corresponds to annotation of Table 2. of https://huggingface.co/papers/2305.08891
+            # "linspace", "leading", "trailing" corresponds to annotation of Table 2. of https://arxiv.org/abs/2305.08891
             if self.config.timestep_spacing == "linspace":
                 timesteps = (
                     np.linspace(0, self.config.num_train_timesteps - 1, num_inference_steps)
@@ -329,7 +330,7 @@ class DDPMScheduler(SchedulerMixin, ConfigMixin):
         alpha_prod_t_prev = self.alphas_cumprod[prev_t] if prev_t >= 0 else self.one
         current_beta_t = 1 - alpha_prod_t / alpha_prod_t_prev
 
-        # For t > 0, compute predicted variance βt (see formula (6) and (7) from https://huggingface.co/papers/2006.11239)
+        # For t > 0, compute predicted variance βt (see formula (6) and (7) from https://arxiv.org/pdf/2006.11239.pdf)
         # and sample from it to get previous sample
         # x_{t-1} ~ N(pred_prev_sample, variance) == add variance to pred_sample
         variance = (1 - alpha_prod_t_prev) / (1 - alpha_prod_t) * current_beta_t
@@ -343,7 +344,7 @@ class DDPMScheduler(SchedulerMixin, ConfigMixin):
         # hacks - were probably added for training stability
         if variance_type == "fixed_small":
             variance = variance
-        # for rl-diffuser https://huggingface.co/papers/2205.09991
+        # for rl-diffuser https://arxiv.org/abs/2205.09991
         elif variance_type == "fixed_small_log":
             variance = torch.log(variance)
             variance = torch.exp(0.5 * variance)
@@ -370,7 +371,7 @@ class DDPMScheduler(SchedulerMixin, ConfigMixin):
         pixels from saturation at each step. We find that dynamic thresholding results in significantly better
         photorealism as well as better image-text alignment, especially when using very large guidance weights."
 
-        https://huggingface.co/papers/2205.11487
+        https://arxiv.org/abs/2205.11487
         """
         dtype = sample.dtype
         batch_size, channels, *remaining_dims = sample.shape
@@ -443,7 +444,7 @@ class DDPMScheduler(SchedulerMixin, ConfigMixin):
         current_beta_t = 1 - current_alpha_t
 
         # 2. compute predicted original sample from predicted noise also called
-        # "predicted x_0" of formula (15) from https://huggingface.co/papers/2006.11239
+        # "predicted x_0" of formula (15) from https://arxiv.org/pdf/2006.11239.pdf
         if self.config.prediction_type == "epsilon":
             pred_original_sample = (sample - beta_prod_t ** (0.5) * model_output) / alpha_prod_t ** (0.5)
         elif self.config.prediction_type == "sample":
@@ -465,12 +466,12 @@ class DDPMScheduler(SchedulerMixin, ConfigMixin):
             )
 
         # 4. Compute coefficients for pred_original_sample x_0 and current sample x_t
-        # See formula (7) from https://huggingface.co/papers/2006.11239
+        # See formula (7) from https://arxiv.org/pdf/2006.11239.pdf
         pred_original_sample_coeff = (alpha_prod_t_prev ** (0.5) * current_beta_t) / beta_prod_t
         current_sample_coeff = current_alpha_t ** (0.5) * beta_prod_t_prev / beta_prod_t
 
         # 5. Compute predicted previous sample µ_t
-        # See formula (7) from https://huggingface.co/papers/2006.11239
+        # See formula (7) from https://arxiv.org/pdf/2006.11239.pdf
         pred_prev_sample = pred_original_sample_coeff * pred_original_sample + current_sample_coeff * sample
 
         # 6. Add noise
@@ -491,10 +492,7 @@ class DDPMScheduler(SchedulerMixin, ConfigMixin):
         pred_prev_sample = pred_prev_sample + variance
 
         if not return_dict:
-            return (
-                pred_prev_sample,
-                pred_original_sample,
-            )
+            return (pred_prev_sample,)
 
         return DDPMSchedulerOutput(prev_sample=pred_prev_sample, pred_original_sample=pred_original_sample)
 
@@ -547,12 +545,16 @@ class DDPMScheduler(SchedulerMixin, ConfigMixin):
         return self.config.num_train_timesteps
 
     def previous_timestep(self, timestep):
-        if self.custom_timesteps or self.num_inference_steps:
+        if self.custom_timesteps:
             index = (self.timesteps == timestep).nonzero(as_tuple=True)[0][0]
             if index == self.timesteps.shape[0] - 1:
                 prev_t = torch.tensor(-1)
             else:
                 prev_t = self.timesteps[index + 1]
         else:
-            prev_t = timestep - 1
+            num_inference_steps = (
+                self.num_inference_steps if self.num_inference_steps else self.config.num_train_timesteps
+            )
+            prev_t = timestep - self.config.num_train_timesteps // num_inference_steps
+
         return prev_t

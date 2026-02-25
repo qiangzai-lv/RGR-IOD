@@ -1,4 +1,4 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
+# Copyright 2024 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ import torch
 from huggingface_hub import snapshot_download
 from huggingface_hub.utils import LocalEntryNotFoundError, validate_hf_hub_args
 from packaging import version
-from typing_extensions import Self
 
 from ..utils import deprecate, is_transformers_available, logging
 from .single_file_utils import (
@@ -61,7 +60,6 @@ def load_single_file_sub_model(
     local_files_only=False,
     torch_dtype=None,
     is_legacy_loading=False,
-    disable_mmap=False,
     **kwargs,
 ):
     if is_pipeline_module:
@@ -108,7 +106,6 @@ def load_single_file_sub_model(
             subfolder=name,
             torch_dtype=torch_dtype,
             local_files_only=local_files_only,
-            disable_mmap=disable_mmap,
             **kwargs,
         )
 
@@ -270,7 +267,7 @@ class FromSingleFileMixin:
 
     @classmethod
     @validate_hf_hub_args
-    def from_single_file(cls, pretrained_model_link_or_path, **kwargs) -> Self:
+    def from_single_file(cls, pretrained_model_link_or_path, **kwargs):
         r"""
         Instantiate a [`DiffusionPipeline`] from pretrained pipeline weights saved in the `.ckpt` or `.safetensors`
         format. The pipeline is set in evaluation mode (`model.eval()`) by default.
@@ -311,9 +308,6 @@ class FromSingleFileMixin:
                       hosted on the Hub.
                     - A path to a *directory* (for example `./my_pipeline_directory/`) containing the pipeline
                       component configs in Diffusers format.
-            disable_mmap ('bool', *optional*, defaults to 'False'):
-                Whether to disable mmap when loading a Safetensors model. This option can perform better when the model
-                is on a network mount or hard drive.
             kwargs (remaining dictionary of keyword arguments, *optional*):
                 Can be used to overwrite load and saveable variables (the pipeline components of the specific pipeline
                 class). The overwritten components are passed directly to the pipelines `__init__` method. See example
@@ -335,7 +329,7 @@ class FromSingleFileMixin:
 
         >>> # Enable float16 and move to GPU
         >>> pipeline = StableDiffusionPipeline.from_single_file(
-        ...     "https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5/blob/main/v1-5-pruned-emaonly.ckpt",
+        ...     "https://huggingface.co/runwayml/stable-diffusion-v1-5/blob/main/v1-5-pruned-emaonly.ckpt",
         ...     torch_dtype=torch.float16,
         ... )
         >>> pipeline.to("cuda")
@@ -361,15 +355,8 @@ class FromSingleFileMixin:
         local_files_only = kwargs.pop("local_files_only", False)
         revision = kwargs.pop("revision", None)
         torch_dtype = kwargs.pop("torch_dtype", None)
-        disable_mmap = kwargs.pop("disable_mmap", False)
 
         is_legacy_loading = False
-
-        if torch_dtype is not None and not isinstance(torch_dtype, torch.dtype):
-            torch_dtype = torch.float32
-            logger.warning(
-                f"Passed `torch_dtype` {torch_dtype} is not a `torch.dtype`. Defaulting to `torch.float32`."
-            )
 
         # We shouldn't allow configuring individual models components through a Pipeline creation method
         # These model kwargs should be deprecated
@@ -396,7 +383,6 @@ class FromSingleFileMixin:
             cache_dir=cache_dir,
             local_files_only=local_files_only,
             revision=revision,
-            disable_mmap=disable_mmap,
         )
 
         if config is None:
@@ -453,7 +439,7 @@ class FromSingleFileMixin:
                     logger.warning(
                         "Detected legacy `from_single_file` loading behavior. Attempting to create the pipeline based on inferred components.\n"
                         "This may lead to errors if the model components are not correctly inferred. \n"
-                        "To avoid this warning, please explicitly pass the `config` argument to `from_single_file` with a path to a local diffusers model repo \n"
+                        "To avoid this warning, please explicity pass the `config` argument to `from_single_file` with a path to a local diffusers model repo \n"
                         "e.g. `from_single_file(<my model checkpoint path>, config=<path to local diffusers model repo>) \n"
                         "or run `from_single_file` with `local_files_only=False` first to update the local cache directory with "
                         "the necessary config files.\n"
@@ -518,7 +504,6 @@ class FromSingleFileMixin:
                         original_config=original_config,
                         local_files_only=local_files_only,
                         is_legacy_loading=is_legacy_loading,
-                        disable_mmap=disable_mmap,
                         **kwargs,
                     )
                 except SingleFileComponentError as e:

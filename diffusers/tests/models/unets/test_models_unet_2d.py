@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 HuggingFace Inc.
+# Copyright 2024 HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ import torch
 from diffusers import UNet2DModel
 from diffusers.utils import logging
 from diffusers.utils.testing_utils import (
-    backend_empty_cache,
     enable_full_determinism,
     floats_tensor,
     require_torch_accelerator,
@@ -106,52 +105,6 @@ class Unet2DModelTests(ModelTesterMixin, UNetTesterMixin, unittest.TestCase):
         expected_shape = inputs_dict["sample"].shape
         self.assertEqual(output.shape, expected_shape, "Input and output shapes do not match")
 
-    def test_mid_block_none(self):
-        init_dict, inputs_dict = self.prepare_init_args_and_inputs_for_common()
-        mid_none_init_dict, mid_none_inputs_dict = self.prepare_init_args_and_inputs_for_common()
-        mid_none_init_dict["mid_block_type"] = None
-
-        model = self.model_class(**init_dict)
-        model.to(torch_device)
-        model.eval()
-
-        mid_none_model = self.model_class(**mid_none_init_dict)
-        mid_none_model.to(torch_device)
-        mid_none_model.eval()
-
-        self.assertIsNone(mid_none_model.mid_block, "Mid block should not exist.")
-
-        with torch.no_grad():
-            output = model(**inputs_dict)
-
-            if isinstance(output, dict):
-                output = output.to_tuple()[0]
-
-        with torch.no_grad():
-            mid_none_output = mid_none_model(**mid_none_inputs_dict)
-
-            if isinstance(mid_none_output, dict):
-                mid_none_output = mid_none_output.to_tuple()[0]
-
-        self.assertFalse(torch.allclose(output, mid_none_output, rtol=1e-3), "outputs should be different.")
-
-    def test_gradient_checkpointing_is_applied(self):
-        expected_set = {
-            "AttnUpBlock2D",
-            "AttnDownBlock2D",
-            "UNetMidBlock2D",
-            "UpBlock2D",
-            "DownBlock2D",
-        }
-
-        # NOTE: unlike UNet2DConditionModel, UNet2DModel does not currently support tuples for `attention_head_dim`
-        attention_head_dim = 8
-        block_out_channels = (16, 32)
-
-        super().test_gradient_checkpointing_is_applied(
-            expected_set=expected_set, attention_head_dim=attention_head_dim, block_out_channels=block_out_channels
-        )
-
 
 class UNetLDMModelTests(ModelTesterMixin, UNetTesterMixin, unittest.TestCase):
     model_class = UNet2DModel
@@ -230,7 +183,7 @@ class UNetLDMModelTests(ModelTesterMixin, UNetTesterMixin, unittest.TestCase):
 
         # two models don't need to stay in the device at the same time
         del model_accelerate
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
         gc.collect()
 
         model_normal_load, _ = UNet2DModel.from_pretrained(
@@ -266,17 +219,6 @@ class UNetLDMModelTests(ModelTesterMixin, UNetTesterMixin, unittest.TestCase):
         # fmt: on
 
         self.assertTrue(torch_all_close(output_slice, expected_output_slice, rtol=1e-3))
-
-    def test_gradient_checkpointing_is_applied(self):
-        expected_set = {"DownBlock2D", "UNetMidBlock2D", "UpBlock2D"}
-
-        # NOTE: unlike UNet2DConditionModel, UNet2DModel does not currently support tuples for `attention_head_dim`
-        attention_head_dim = 32
-        block_out_channels = (32, 64)
-
-        super().test_gradient_checkpointing_is_applied(
-            expected_set=expected_set, attention_head_dim=attention_head_dim, block_out_channels=block_out_channels
-        )
 
 
 class NCSNppModelTests(ModelTesterMixin, UNetTesterMixin, unittest.TestCase):
@@ -384,33 +326,6 @@ class NCSNppModelTests(ModelTesterMixin, UNetTesterMixin, unittest.TestCase):
 
         self.assertTrue(torch_all_close(output_slice, expected_output_slice, rtol=1e-2))
 
-    @unittest.skip("Test not supported.")
     def test_forward_with_norm_groups(self):
         # not required for this model
-        pass
-
-    def test_gradient_checkpointing_is_applied(self):
-        expected_set = {
-            "UNetMidBlock2D",
-        }
-
-        block_out_channels = (32, 64, 64, 64)
-
-        super().test_gradient_checkpointing_is_applied(
-            expected_set=expected_set, block_out_channels=block_out_channels
-        )
-
-    def test_effective_gradient_checkpointing(self):
-        super().test_effective_gradient_checkpointing(skip={"time_proj.weight"})
-
-    @unittest.skip(
-        "To make layerwise casting work with this model, we will have to update the implementation. Due to potentially low usage, we don't support it here."
-    )
-    def test_layerwise_casting_inference(self):
-        pass
-
-    @unittest.skip(
-        "To make layerwise casting work with this model, we will have to update the implementation. Due to potentially low usage, we don't support it here."
-    )
-    def test_layerwise_casting_memory(self):
         pass

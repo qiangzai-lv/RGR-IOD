@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 The HuggingFace Inc. team.
+# Copyright 2024 The HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,11 +20,8 @@ import json
 import os
 import re
 import shutil
-import signal
 import sys
-import threading
 from pathlib import Path
-from types import ModuleType
 from typing import Dict, Optional, Union
 from urllib import request
 
@@ -40,8 +37,6 @@ logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 # See https://huggingface.co/datasets/diffusers/community-pipelines-mirror
 COMMUNITY_PIPELINES_MIRROR_ID = "diffusers/community-pipelines-mirror"
-TIME_OUT_REMOTE_CODE = int(os.getenv("DIFFUSERS_TIMEOUT_REMOTE_CODE", 15))
-_HF_REMOTE_CODE_LOCK = threading.Lock()
 
 
 def get_diffusers_versions():
@@ -159,87 +154,15 @@ def check_imports(filename):
     return get_relative_imports(filename)
 
 
-def _raise_timeout_error(signum, frame):
-    raise ValueError(
-        "Loading this model requires you to execute custom code contained in the model repository on your local "
-        "machine. Please set the option `trust_remote_code=True` to permit loading of this model."
-    )
-
-
-def resolve_trust_remote_code(trust_remote_code, model_name, has_remote_code):
-    if trust_remote_code is None:
-        if has_remote_code and TIME_OUT_REMOTE_CODE > 0:
-            prev_sig_handler = None
-            try:
-                prev_sig_handler = signal.signal(signal.SIGALRM, _raise_timeout_error)
-                signal.alarm(TIME_OUT_REMOTE_CODE)
-                while trust_remote_code is None:
-                    answer = input(
-                        f"The repository for {model_name} contains custom code which must be executed to correctly "
-                        f"load the model. You can inspect the repository content at https://hf.co/{model_name}.\n"
-                        f"You can avoid this prompt in future by passing the argument `trust_remote_code=True`.\n\n"
-                        f"Do you wish to run the custom code? [y/N] "
-                    )
-                    if answer.lower() in ["yes", "y", "1"]:
-                        trust_remote_code = True
-                    elif answer.lower() in ["no", "n", "0", ""]:
-                        trust_remote_code = False
-                signal.alarm(0)
-            except Exception:
-                # OS which does not support signal.SIGALRM
-                raise ValueError(
-                    f"The repository for {model_name} contains custom code which must be executed to correctly "
-                    f"load the model. You can inspect the repository content at https://hf.co/{model_name}.\n"
-                    f"Please pass the argument `trust_remote_code=True` to allow custom code to be run."
-                )
-            finally:
-                if prev_sig_handler is not None:
-                    signal.signal(signal.SIGALRM, prev_sig_handler)
-                    signal.alarm(0)
-        elif has_remote_code:
-            # For the CI which puts the timeout at 0
-            _raise_timeout_error(None, None)
-
-    if has_remote_code and not trust_remote_code:
-        raise ValueError(
-            f"Loading {model_name} requires you to execute the configuration file in that"
-            " repo on your local machine. Make sure you have read the code there to avoid malicious use, then"
-            " set the option `trust_remote_code=True` to remove this error."
-        )
-
-    return trust_remote_code
-
-
-def get_class_in_module(class_name, module_path, force_reload=False):
+def get_class_in_module(class_name, module_path):
     """
     Import a module on the cache directory for modules and extract a class from it.
     """
-    name = os.path.normpath(module_path)
-    if name.endswith(".py"):
-        name = name[:-3]
-    name = name.replace(os.path.sep, ".")
-    module_file: Path = Path(HF_MODULES_CACHE) / module_path
-
-    with _HF_REMOTE_CODE_LOCK:
-        if force_reload:
-            sys.modules.pop(name, None)
-            importlib.invalidate_caches()
-        cached_module: Optional[ModuleType] = sys.modules.get(name)
-        module_spec = importlib.util.spec_from_file_location(name, location=module_file)
-
-        module: ModuleType
-        if cached_module is None:
-            module = importlib.util.module_from_spec(module_spec)
-            # insert it into sys.modules before any loading begins
-            sys.modules[name] = module
-        else:
-            module = cached_module
-
-        module_spec.loader.exec_module(module)
+    module_path = module_path.replace(os.path.sep, ".")
+    module = importlib.import_module(module_path)
 
     if class_name is None:
         return find_pipeline_class(module)
-
     return getattr(module, class_name)
 
 
@@ -318,8 +241,8 @@ def get_cached_module_file(
 
     <Tip>
 
-    You may pass a token in `token` if you are not logged in (`hf auth login`) and want to use private or [gated
-    models](https://huggingface.co/docs/hub/models-gated#gated-models).
+    You may pass a token in `token` if you are not logged in (`huggingface-cli login`) and want to use private or
+    [gated models](https://huggingface.co/docs/hub/models-gated#gated-models).
 
     </Tip>
 
@@ -402,7 +325,7 @@ def get_cached_module_file(
         # We always copy local files (we could hash the file to see if there was a change, and give them the name of
         # that hash, to only copy when there is a modification but it seems overkill for now).
         # The only reason we do the copy is to avoid putting too many folders in sys.path.
-        shutil.copyfile(resolved_module_file, submodule_path / module_file)
+        shutil.copy(resolved_module_file, submodule_path / module_file)
         for module_needed in modules_needed:
             if len(module_needed.split(".")) == 2:
                 module_needed = "/".join(module_needed.split("."))
@@ -410,7 +333,7 @@ def get_cached_module_file(
                 if not os.path.exists(submodule_path / module_folder):
                     os.makedirs(submodule_path / module_folder)
             module_needed = f"{module_needed}.py"
-            shutil.copyfile(os.path.join(pretrained_model_name_or_path, module_needed), submodule_path / module_needed)
+            shutil.copy(os.path.join(pretrained_model_name_or_path, module_needed), submodule_path / module_needed)
     else:
         # Get the commit hash
         # TODO: we will get this info in the etag soon, so retrieve it from there and not here.
@@ -427,7 +350,7 @@ def get_cached_module_file(
                 module_folder = module_file.split("/")[0]
                 if not os.path.exists(submodule_path / module_folder):
                     os.makedirs(submodule_path / module_folder)
-            shutil.copyfile(resolved_module_file, submodule_path / module_file)
+            shutil.copy(resolved_module_file, submodule_path / module_file)
 
         # Make sure we also have every file with relative
         for module_needed in modules_needed:
@@ -505,8 +428,8 @@ def get_class_from_dynamic_module(
 
     <Tip>
 
-    You may pass a token in `token` if you are not logged in (`hf auth login`) and want to use private or [gated
-    models](https://huggingface.co/docs/hub/models-gated#gated-models).
+    You may pass a token in `token` if you are not logged in (`huggingface-cli login`) and want to use private or
+    [gated models](https://huggingface.co/docs/hub/models-gated#gated-models).
 
     </Tip>
 
@@ -531,4 +454,4 @@ def get_class_from_dynamic_module(
         revision=revision,
         local_files_only=local_files_only,
     )
-    return get_class_in_module(class_name, final_module)
+    return get_class_in_module(class_name, final_module.replace(".py", ""))

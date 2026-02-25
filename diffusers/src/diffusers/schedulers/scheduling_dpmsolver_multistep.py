@@ -1,4 +1,4 @@
-# Copyright 2025 TSAIL Team and The HuggingFace Team. All rights reserved.
+# Copyright 2024 TSAIL Team and The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,13 +21,9 @@ import numpy as np
 import torch
 
 from ..configuration_utils import ConfigMixin, register_to_config
-from ..utils import deprecate, is_scipy_available
+from ..utils import deprecate
 from ..utils.torch_utils import randn_tensor
 from .scheduling_utils import KarrasDiffusionSchedulers, SchedulerMixin, SchedulerOutput
-
-
-if is_scipy_available():
-    import scipy.stats
 
 
 # Copied from diffusers.schedulers.scheduling_ddpm.betas_for_alpha_bar
@@ -78,7 +74,7 @@ def betas_for_alpha_bar(
 # Copied from diffusers.schedulers.scheduling_ddim.rescale_zero_terminal_snr
 def rescale_zero_terminal_snr(betas):
     """
-    Rescales betas to have zero terminal SNR Based on https://huggingface.co/papers/2305.08891 (Algorithm 1)
+    Rescales betas to have zero terminal SNR Based on https://arxiv.org/pdf/2305.08891.pdf (Algorithm 1)
 
 
     Args:
@@ -136,8 +132,8 @@ class DPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
             sampling, and `solver_order=3` for unconditional sampling.
         prediction_type (`str`, defaults to `epsilon`, *optional*):
             Prediction type of the scheduler function; can be `epsilon` (predicts the noise of the diffusion process),
-            `sample` (directly predicts the noisy sample), `v_prediction` (see section 2.4 of [Imagen
-            Video](https://imagen.research.google/video/paper.pdf) paper), or `flow_prediction`.
+            `sample` (directly predicts the noisy sample`) or `v_prediction` (see section 2.4 of [Imagen
+            Video](https://imagen.research.google/video/paper.pdf) paper).
         thresholding (`bool`, defaults to `False`):
             Whether to use the "dynamic thresholding" method. This is unsuitable for latent-space diffusion models such
             as Stable Diffusion.
@@ -165,19 +161,10 @@ class DPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
         use_karras_sigmas (`bool`, *optional*, defaults to `False`):
             Whether to use Karras sigmas for step sizes in the noise schedule during the sampling process. If `True`,
             the sigmas are determined according to a sequence of noise levels {σi}.
-        use_exponential_sigmas (`bool`, *optional*, defaults to `False`):
-            Whether to use exponential sigmas for step sizes in the noise schedule during the sampling process.
-        use_beta_sigmas (`bool`, *optional*, defaults to `False`):
-            Whether to use beta sigmas for step sizes in the noise schedule during the sampling process. Refer to [Beta
-            Sampling is All You Need](https://huggingface.co/papers/2407.12173) for more information.
         use_lu_lambdas (`bool`, *optional*, defaults to `False`):
             Whether to use the uniform-logSNR for step sizes proposed by Lu's DPM-Solver in the noise schedule during
             the sampling process. If `True`, the sigmas and time steps are determined according to a sequence of
             `lambda(t)`.
-        use_flow_sigmas (`bool`, *optional*, defaults to `False`):
-            Whether to use flow sigmas for step sizes in the noise schedule during the sampling process.
-        flow_shift (`float`, *optional*, defaults to 1.0):
-            The shift value for the timestep schedule for flow matching.
         final_sigmas_type (`str`, defaults to `"zero"`):
             The final `sigma` value for the noise schedule during the sampling process. If `"sigma_min"`, the final
             sigma is the same as the last sigma in the training schedule. If `zero`, the final sigma is set to 0.
@@ -219,26 +206,14 @@ class DPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
         lower_order_final: bool = True,
         euler_at_final: bool = False,
         use_karras_sigmas: Optional[bool] = False,
-        use_exponential_sigmas: Optional[bool] = False,
-        use_beta_sigmas: Optional[bool] = False,
         use_lu_lambdas: Optional[bool] = False,
-        use_flow_sigmas: Optional[bool] = False,
-        flow_shift: Optional[float] = 1.0,
         final_sigmas_type: Optional[str] = "zero",  # "zero", "sigma_min"
         lambda_min_clipped: float = -float("inf"),
         variance_type: Optional[str] = None,
         timestep_spacing: str = "linspace",
         steps_offset: int = 0,
         rescale_betas_zero_snr: bool = False,
-        use_dynamic_shifting: bool = False,
-        time_shift_type: str = "exponential",
     ):
-        if self.config.use_beta_sigmas and not is_scipy_available():
-            raise ImportError("Make sure to install scipy if you want to use beta sigmas.")
-        if sum([self.config.use_beta_sigmas, self.config.use_exponential_sigmas, self.config.use_karras_sigmas]) > 1:
-            raise ValueError(
-                "Only one of `config.use_beta_sigmas`, `config.use_exponential_sigmas`, `config.use_karras_sigmas` can be used."
-            )
         if algorithm_type in ["dpmsolver", "sde-dpmsolver"]:
             deprecation_message = f"algorithm_type {algorithm_type} is deprecated and will be removed in a future version. Choose from `dpmsolver++` or `sde-dpmsolver++` instead"
             deprecate("algorithm_types dpmsolver and sde-dpmsolver", "1.0.0", deprecation_message)
@@ -332,7 +307,6 @@ class DPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
         self,
         num_inference_steps: int = None,
         device: Union[str, torch.device] = None,
-        mu: Optional[float] = None,
         timesteps: Optional[List[int]] = None,
     ):
         """
@@ -348,9 +322,6 @@ class DPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
                 based on the `timestep_spacing` attribute. If `timesteps` is passed, `num_inference_steps` and `sigmas`
                 must be `None`, and `timestep_spacing` attribute will be ignored.
         """
-        if mu is not None:
-            assert self.config.use_dynamic_shifting and self.config.time_shift_type == "exponential"
-            self.config.flow_shift = np.exp(mu)
         if num_inference_steps is None and timesteps is None:
             raise ValueError("Must pass exactly one of `num_inference_steps` or `timesteps`.")
         if num_inference_steps is not None and timesteps is not None:
@@ -359,10 +330,6 @@ class DPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
             raise ValueError("Cannot use `timesteps` with `config.use_karras_sigmas = True`")
         if timesteps is not None and self.config.use_lu_lambdas:
             raise ValueError("Cannot use `timesteps` with `config.use_lu_lambdas = True`")
-        if timesteps is not None and self.config.use_exponential_sigmas:
-            raise ValueError("Cannot set `timesteps` with `config.use_exponential_sigmas = True`.")
-        if timesteps is not None and self.config.use_beta_sigmas:
-            raise ValueError("Cannot set `timesteps` with `config.use_beta_sigmas = True`.")
 
         if timesteps is not None:
             timesteps = np.array(timesteps).astype(np.int64)
@@ -372,7 +339,7 @@ class DPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
             clipped_idx = torch.searchsorted(torch.flip(self.lambda_t, [0]), self.config.lambda_min_clipped)
             last_timestep = ((self.config.num_train_timesteps - clipped_idx).numpy()).item()
 
-            # "linspace", "leading", "trailing" corresponds to annotation of Table 2. of https://huggingface.co/papers/2305.08891
+            # "linspace", "leading", "trailing" corresponds to annotation of Table 2. of https://arxiv.org/abs/2305.08891
             if self.config.timestep_spacing == "linspace":
                 timesteps = (
                     np.linspace(0, last_timestep - 1, num_inference_steps + 1)
@@ -405,29 +372,12 @@ class DPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
         if self.config.use_karras_sigmas:
             sigmas = np.flip(sigmas).copy()
             sigmas = self._convert_to_karras(in_sigmas=sigmas, num_inference_steps=num_inference_steps)
-            timesteps = np.array([self._sigma_to_t(sigma, log_sigmas) for sigma in sigmas])
-            if self.config.beta_schedule != "squaredcos_cap_v2":
-                timesteps = timesteps.round()
+            timesteps = np.array([self._sigma_to_t(sigma, log_sigmas) for sigma in sigmas]).round()
         elif self.config.use_lu_lambdas:
             lambdas = np.flip(log_sigmas.copy())
             lambdas = self._convert_to_lu(in_lambdas=lambdas, num_inference_steps=num_inference_steps)
             sigmas = np.exp(lambdas)
-            timesteps = np.array([self._sigma_to_t(sigma, log_sigmas) for sigma in sigmas])
-            if self.config.beta_schedule != "squaredcos_cap_v2":
-                timesteps = timesteps.round()
-        elif self.config.use_exponential_sigmas:
-            sigmas = np.flip(sigmas).copy()
-            sigmas = self._convert_to_exponential(in_sigmas=sigmas, num_inference_steps=num_inference_steps)
-            timesteps = np.array([self._sigma_to_t(sigma, log_sigmas) for sigma in sigmas])
-        elif self.config.use_beta_sigmas:
-            sigmas = np.flip(sigmas).copy()
-            sigmas = self._convert_to_beta(in_sigmas=sigmas, num_inference_steps=num_inference_steps)
-            timesteps = np.array([self._sigma_to_t(sigma, log_sigmas) for sigma in sigmas])
-        elif self.config.use_flow_sigmas:
-            alphas = np.linspace(1, 1 / self.config.num_train_timesteps, num_inference_steps + 1)
-            sigmas = 1.0 - alphas
-            sigmas = np.flip(self.config.flow_shift * sigmas / (1 + (self.config.flow_shift - 1) * sigmas))[:-1].copy()
-            timesteps = (sigmas * self.config.num_train_timesteps).copy()
+            timesteps = np.array([self._sigma_to_t(sigma, log_sigmas) for sigma in sigmas]).round()
         else:
             sigmas = np.interp(timesteps, np.arange(0, len(sigmas)), sigmas)
 
@@ -466,7 +416,7 @@ class DPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
         pixels from saturation at each step. We find that dynamic thresholding results in significantly better
         photorealism as well as better image-text alignment, especially when using very large guidance weights."
 
-        https://huggingface.co/papers/2205.11487
+        https://arxiv.org/abs/2205.11487
         """
         dtype = sample.dtype
         batch_size, channels, *remaining_dims = sample.shape
@@ -516,12 +466,8 @@ class DPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
         return t
 
     def _sigma_to_alpha_sigma_t(self, sigma):
-        if self.config.use_flow_sigmas:
-            alpha_t = 1 - sigma
-            sigma_t = sigma
-        else:
-            alpha_t = 1 / ((sigma**2 + 1) ** 0.5)
-            sigma_t = sigma * alpha_t
+        alpha_t = 1 / ((sigma**2 + 1) ** 0.5)
+        sigma_t = sigma * alpha_t
 
         return alpha_t, sigma_t
 
@@ -564,60 +510,6 @@ class DPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
         lambdas = (max_inv_rho + ramp * (min_inv_rho - max_inv_rho)) ** rho
         return lambdas
 
-    # Copied from diffusers.schedulers.scheduling_euler_discrete.EulerDiscreteScheduler._convert_to_exponential
-    def _convert_to_exponential(self, in_sigmas: torch.Tensor, num_inference_steps: int) -> torch.Tensor:
-        """Constructs an exponential noise schedule."""
-
-        # Hack to make sure that other schedulers which copy this function don't break
-        # TODO: Add this logic to the other schedulers
-        if hasattr(self.config, "sigma_min"):
-            sigma_min = self.config.sigma_min
-        else:
-            sigma_min = None
-
-        if hasattr(self.config, "sigma_max"):
-            sigma_max = self.config.sigma_max
-        else:
-            sigma_max = None
-
-        sigma_min = sigma_min if sigma_min is not None else in_sigmas[-1].item()
-        sigma_max = sigma_max if sigma_max is not None else in_sigmas[0].item()
-
-        sigmas = np.exp(np.linspace(math.log(sigma_max), math.log(sigma_min), num_inference_steps))
-        return sigmas
-
-    # Copied from diffusers.schedulers.scheduling_euler_discrete.EulerDiscreteScheduler._convert_to_beta
-    def _convert_to_beta(
-        self, in_sigmas: torch.Tensor, num_inference_steps: int, alpha: float = 0.6, beta: float = 0.6
-    ) -> torch.Tensor:
-        """From "Beta Sampling is All You Need" [arXiv:2407.12173] (Lee et. al, 2024)"""
-
-        # Hack to make sure that other schedulers which copy this function don't break
-        # TODO: Add this logic to the other schedulers
-        if hasattr(self.config, "sigma_min"):
-            sigma_min = self.config.sigma_min
-        else:
-            sigma_min = None
-
-        if hasattr(self.config, "sigma_max"):
-            sigma_max = self.config.sigma_max
-        else:
-            sigma_max = None
-
-        sigma_min = sigma_min if sigma_min is not None else in_sigmas[-1].item()
-        sigma_max = sigma_max if sigma_max is not None else in_sigmas[0].item()
-
-        sigmas = np.array(
-            [
-                sigma_min + (ppf * (sigma_max - sigma_min))
-                for ppf in [
-                    scipy.stats.beta.ppf(timestep, alpha, beta)
-                    for timestep in 1 - np.linspace(0, 1, num_inference_steps)
-                ]
-            ]
-        )
-        return sigmas
-
     def convert_model_output(
         self,
         model_output: torch.Tensor,
@@ -652,7 +544,7 @@ class DPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
             if len(args) > 1:
                 sample = args[1]
             else:
-                raise ValueError("missing `sample` as a required keyword argument")
+                raise ValueError("missing `sample` as a required keyward argument")
         if timestep is not None:
             deprecate(
                 "timesteps",
@@ -675,13 +567,10 @@ class DPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
                 sigma = self.sigmas[self.step_index]
                 alpha_t, sigma_t = self._sigma_to_alpha_sigma_t(sigma)
                 x0_pred = alpha_t * sample - sigma_t * model_output
-            elif self.config.prediction_type == "flow_prediction":
-                sigma_t = self.sigmas[self.step_index]
-                x0_pred = sample - sigma_t * model_output
             else:
                 raise ValueError(
-                    f"prediction_type given as {self.config.prediction_type} must be one of `epsilon`, `sample`, "
-                    "`v_prediction`, or `flow_prediction` for the DPMSolverMultistepScheduler."
+                    f"prediction_type given as {self.config.prediction_type} must be one of `epsilon`, `sample`, or"
+                    " `v_prediction` for the DPMSolverMultistepScheduler."
                 )
 
             if self.config.thresholding:
@@ -747,7 +636,7 @@ class DPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
             if len(args) > 2:
                 sample = args[2]
             else:
-                raise ValueError("missing `sample` as a required keyword argument")
+                raise ValueError(" missing `sample` as a required keyward argument")
         if timestep is not None:
             deprecate(
                 "timesteps",
@@ -816,7 +705,7 @@ class DPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
             if len(args) > 2:
                 sample = args[2]
             else:
-                raise ValueError("missing `sample` as a required keyword argument")
+                raise ValueError(" missing `sample` as a required keyward argument")
         if timestep_list is not None:
             deprecate(
                 "timestep_list",
@@ -851,7 +740,7 @@ class DPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
         r0 = h_0 / h
         D0, D1 = m0, (1.0 / r0) * (m0 - m1)
         if self.config.algorithm_type == "dpmsolver++":
-            # See https://huggingface.co/papers/2211.01095 for detailed derivations
+            # See https://arxiv.org/abs/2211.01095 for detailed derivations
             if self.config.solver_type == "midpoint":
                 x_t = (
                     (sigma_t / sigma_s0) * sample
@@ -865,7 +754,7 @@ class DPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
                     + (alpha_t * ((torch.exp(-h) - 1.0) / h + 1.0)) * D1
                 )
         elif self.config.algorithm_type == "dpmsolver":
-            # See https://huggingface.co/papers/2206.00927 for detailed derivations
+            # See https://arxiv.org/abs/2206.00927 for detailed derivations
             if self.config.solver_type == "midpoint":
                 x_t = (
                     (alpha_t / alpha_s0) * sample
@@ -917,7 +806,6 @@ class DPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
         model_output_list: List[torch.Tensor],
         *args,
         sample: torch.Tensor = None,
-        noise: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> torch.Tensor:
         """
@@ -940,7 +828,7 @@ class DPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
             if len(args) > 2:
                 sample = args[2]
             else:
-                raise ValueError("missing `sample` as a required keyword argument")
+                raise ValueError(" missing`sample` as a required keyward argument")
         if timestep_list is not None:
             deprecate(
                 "timestep_list",
@@ -981,7 +869,7 @@ class DPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
         D1 = D1_0 + (r0 / (r0 + r1)) * (D1_0 - D1_1)
         D2 = (1.0 / (r0 + r1)) * (D1_0 - D1_1)
         if self.config.algorithm_type == "dpmsolver++":
-            # See https://huggingface.co/papers/2206.00927 for detailed derivations
+            # See https://arxiv.org/abs/2206.00927 for detailed derivations
             x_t = (
                 (sigma_t / sigma_s0) * sample
                 - (alpha_t * (torch.exp(-h) - 1.0)) * D0
@@ -989,21 +877,12 @@ class DPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
                 - (alpha_t * ((torch.exp(-h) - 1.0 + h) / h**2 - 0.5)) * D2
             )
         elif self.config.algorithm_type == "dpmsolver":
-            # See https://huggingface.co/papers/2206.00927 for detailed derivations
+            # See https://arxiv.org/abs/2206.00927 for detailed derivations
             x_t = (
                 (alpha_t / alpha_s0) * sample
                 - (sigma_t * (torch.exp(h) - 1.0)) * D0
                 - (sigma_t * ((torch.exp(h) - 1.0) / h - 1.0)) * D1
                 - (sigma_t * ((torch.exp(h) - 1.0 - h) / h**2 - 0.5)) * D2
-            )
-        elif self.config.algorithm_type == "sde-dpmsolver++":
-            assert noise is not None
-            x_t = (
-                (sigma_t / sigma_s0 * torch.exp(-h)) * sample
-                + (alpha_t * (1.0 - torch.exp(-2.0 * h))) * D0
-                + (alpha_t * ((1.0 - torch.exp(-2.0 * h)) / (-2.0 * h) + 1.0)) * D1
-                + (alpha_t * ((1.0 - torch.exp(-2.0 * h) - 2.0 * h) / (2.0 * h) ** 2 - 0.5)) * D2
-                + sigma_t * torch.sqrt(1.0 - torch.exp(-2 * h)) * noise
             )
         return x_t
 
@@ -1111,7 +990,7 @@ class DPMSolverMultistepScheduler(SchedulerMixin, ConfigMixin):
         elif self.config.solver_order == 2 or self.lower_order_nums < 2 or lower_order_second:
             prev_sample = self.multistep_dpm_solver_second_order_update(self.model_outputs, sample=sample, noise=noise)
         else:
-            prev_sample = self.multistep_dpm_solver_third_order_update(self.model_outputs, sample=sample, noise=noise)
+            prev_sample = self.multistep_dpm_solver_third_order_update(self.model_outputs, sample=sample)
 
         if self.lower_order_nums < self.config.solver_order:
             self.lower_order_nums += 1

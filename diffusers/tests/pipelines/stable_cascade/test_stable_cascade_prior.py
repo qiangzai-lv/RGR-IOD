@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 HuggingFace Inc.
+# Copyright 2024 HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,12 +24,11 @@ from diffusers import DDPMWuerstchenScheduler, StableCascadePriorPipeline
 from diffusers.models import StableCascadeUNet
 from diffusers.utils.import_utils import is_peft_available
 from diffusers.utils.testing_utils import (
-    backend_empty_cache,
     enable_full_determinism,
     load_numpy,
     numpy_cosine_similarity_distance,
     require_peft_backend,
-    require_torch_accelerator,
+    require_torch_gpu,
     skip_mps,
     slow,
     torch_device,
@@ -241,31 +240,62 @@ class StableCascadePriorPipelineFastTests(PipelineTesterMixin, unittest.TestCase
 
         self.assertTrue(image_embed.shape == lora_image_embed.shape)
 
-    @unittest.skip("Test not supported because dtype determination relies on text encoder.")
-    def test_encode_prompt_works_in_isolation(self):
-        pass
+    def test_stable_cascade_decoder_prompt_embeds(self):
+        device = "cpu"
+        components = self.get_dummy_components()
+
+        pipe = self.pipeline_class(**components)
+        pipe.set_progress_bar_config(disable=None)
+
+        prompt = "A photograph of a shiba inu, wearing a hat"
+        (
+            prompt_embeds,
+            prompt_embeds_pooled,
+            negative_prompt_embeds,
+            negative_prompt_embeds_pooled,
+        ) = pipe.encode_prompt(device, 1, 1, False, prompt=prompt)
+        generator = torch.Generator(device=device)
+
+        output_prompt = pipe(
+            prompt=prompt,
+            num_inference_steps=1,
+            output_type="np",
+            generator=generator.manual_seed(0),
+        )
+        output_prompt_embeds = pipe(
+            prompt=None,
+            prompt_embeds=prompt_embeds,
+            prompt_embeds_pooled=prompt_embeds_pooled,
+            negative_prompt_embeds=negative_prompt_embeds,
+            negative_prompt_embeds_pooled=negative_prompt_embeds_pooled,
+            num_inference_steps=1,
+            output_type="np",
+            generator=generator.manual_seed(0),
+        )
+
+        assert np.abs(output_prompt.image_embeddings - output_prompt_embeds.image_embeddings).max() < 1e-5
 
 
 @slow
-@require_torch_accelerator
+@require_torch_gpu
 class StableCascadePriorPipelineIntegrationTests(unittest.TestCase):
     def setUp(self):
         # clean up the VRAM before each test
         super().setUp()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def tearDown(self):
         # clean up the VRAM after each test
         super().tearDown()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def test_stable_cascade_prior(self):
         pipe = StableCascadePriorPipeline.from_pretrained(
             "stabilityai/stable-cascade-prior", variant="bf16", torch_dtype=torch.bfloat16
         )
-        pipe.enable_model_cpu_offload(device=torch_device)
+        pipe.enable_model_cpu_offload()
         pipe.set_progress_bar_config(disable=None)
 
         prompt = "A photograph of the inside of a subway train. There are raccoons sitting on the seats. One of them is reading a newspaper. The window shows the city in the background."

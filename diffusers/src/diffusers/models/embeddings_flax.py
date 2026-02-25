@@ -1,4 +1,4 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
+# Copyright 2024 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -29,21 +29,11 @@ def get_sinusoidal_embeddings(
     """Returns the positional encoding (same as Tensor2Tensor).
 
     Args:
-        timesteps (`jnp.ndarray` of shape `(N,)`):
-            A 1-D array of N indices, one per batch element. These may be fractional.
-        embedding_dim (`int`):
-            The number of output channels.
-        freq_shift (`float`, *optional*, defaults to `1`):
-            Shift applied to the frequency scaling of the embeddings.
-        min_timescale (`float`, *optional*, defaults to `1`):
-            The smallest time unit used in the sinusoidal calculation (should probably be 0.0).
-        max_timescale (`float`, *optional*, defaults to `1.0e4`):
-            The largest time unit used in the sinusoidal calculation.
-        flip_sin_to_cos (`bool`, *optional*, defaults to `False`):
-            Whether to flip the order of sinusoidal components to cosine first.
-        scale (`float`, *optional*, defaults to `1.0`):
-            A scaling factor applied to the positional embeddings.
-
+        timesteps: a 1-D Tensor of N indices, one per batch element.
+        These may be fractional.
+        embedding_dim: The number of output channels.
+        min_timescale: The smallest time unit (should probably be 0.0).
+        max_timescale: The largest time unit.
     Returns:
         a Tensor of timing signals [N, num_channels]
     """
@@ -71,9 +61,9 @@ class FlaxTimestepEmbedding(nn.Module):
 
     Args:
         time_embed_dim (`int`, *optional*, defaults to `32`):
-            Time step embedding dimension.
-        dtype (`jnp.dtype`, *optional*, defaults to `jnp.float32`):
-            The data type for the embedding parameters.
+                Time step embedding dimension
+        dtype (:obj:`jnp.dtype`, *optional*, defaults to jnp.float32):
+                Parameters `dtype`
     """
 
     time_embed_dim: int = 32
@@ -89,15 +79,11 @@ class FlaxTimestepEmbedding(nn.Module):
 
 class FlaxTimesteps(nn.Module):
     r"""
-    Wrapper Module for sinusoidal Time step Embeddings as described in https://huggingface.co/papers/2006.11239
+    Wrapper Module for sinusoidal Time step Embeddings as described in https://arxiv.org/abs/2006.11239
 
     Args:
         dim (`int`, *optional*, defaults to `32`):
-            Time step embedding dimension.
-        flip_sin_to_cos (`bool`, *optional*, defaults to `False`):
-            Whether to flip the sinusoidal function from sine to cosine.
-        freq_shift (`float`, *optional*, defaults to `1`):
-            Frequency shift applied to the sinusoidal embeddings.
+                Time step embedding dimension
     """
 
     dim: int = 32

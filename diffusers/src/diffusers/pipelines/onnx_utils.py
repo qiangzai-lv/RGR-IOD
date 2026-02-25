@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 The HuggingFace Inc. team.
+# Copyright 2024 The HuggingFace Inc. team.
 # Copyright (c) 2022, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -61,7 +61,7 @@ class OnnxRuntimeModel:
         return self.model.run(None, inputs)
 
     @staticmethod
-    def load_model(path: Union[str, Path], provider=None, sess_options=None, provider_options=None):
+    def load_model(path: Union[str, Path], provider=None, sess_options=None):
         """
         Loads an ONNX Inference session with an ExecutionProvider. Default provider is `CPUExecutionProvider`
 
@@ -75,14 +75,7 @@ class OnnxRuntimeModel:
             logger.info("No onnxruntime provider specified, using CPUExecutionProvider")
             provider = "CPUExecutionProvider"
 
-        if provider_options is None:
-            provider_options = []
-        elif not isinstance(provider_options, list):
-            provider_options = [provider_options]
-
-        return ort.InferenceSession(
-            path, providers=[provider], sess_options=sess_options, provider_options=provider_options
-        )
+        return ort.InferenceSession(path, providers=[provider], sess_options=sess_options)
 
     def _save_pretrained(self, save_directory: Union[str, Path], file_name: Optional[str] = None, **kwargs):
         """
@@ -179,10 +172,7 @@ class OnnxRuntimeModel:
         # load model from local directory
         if os.path.isdir(model_id):
             model = OnnxRuntimeModel.load_model(
-                Path(model_id, model_file_name).as_posix(),
-                provider=provider,
-                sess_options=sess_options,
-                provider_options=kwargs.pop("provider_options"),
+                Path(model_id, model_file_name).as_posix(), provider=provider, sess_options=sess_options
             )
             kwargs["model_save_dir"] = Path(model_id)
         # load model from hub
@@ -198,12 +188,7 @@ class OnnxRuntimeModel:
             )
             kwargs["model_save_dir"] = Path(model_cache_path).parent
             kwargs["latest_model_name"] = Path(model_cache_path).name
-            model = OnnxRuntimeModel.load_model(
-                model_cache_path,
-                provider=provider,
-                sess_options=sess_options,
-                provider_options=kwargs.pop("provider_options"),
-            )
+            model = OnnxRuntimeModel.load_model(model_cache_path, provider=provider, sess_options=sess_options)
         return cls(model=model, **kwargs)
 
     @classmethod

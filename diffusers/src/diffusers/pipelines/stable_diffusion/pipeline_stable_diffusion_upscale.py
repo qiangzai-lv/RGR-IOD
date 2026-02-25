@@ -1,4 +1,4 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
+# Copyright 2024 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -30,25 +30,11 @@ from ...models.attention_processor import (
 )
 from ...models.lora import adjust_lora_scale_text_encoder
 from ...schedulers import DDPMScheduler, KarrasDiffusionSchedulers
-from ...utils import (
-    USE_PEFT_BACKEND,
-    deprecate,
-    is_torch_xla_available,
-    logging,
-    scale_lora_layers,
-    unscale_lora_layers,
-)
+from ...utils import USE_PEFT_BACKEND, deprecate, logging, scale_lora_layers, unscale_lora_layers
 from ...utils.torch_utils import randn_tensor
 from ..pipeline_utils import DiffusionPipeline, StableDiffusionMixin
 from . import StableDiffusionPipelineOutput
 
-
-if is_torch_xla_available():
-    import torch_xla.core.xla_model as xm
-
-    XLA_AVAILABLE = True
-else:
-    XLA_AVAILABLE = False
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -163,7 +149,7 @@ class StableDiffusionUpscalePipeline(
             watermarker=watermarker,
             feature_extractor=feature_extractor,
         )
-        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1) if getattr(self, "vae", None) else 8
+        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor, resample="bicubic")
         self.register_to_config(max_noise_level=max_noise_level)
 
@@ -404,7 +390,7 @@ class StableDiffusionUpscalePipeline(
     def prepare_extra_step_kwargs(self, generator, eta):
         # prepare extra kwargs for the scheduler step, since not all schedulers have the same signature
         # eta (η) is only used with the DDIMScheduler, it will be ignored for other schedulers.
-        # eta corresponds to η in DDIM paper: https://huggingface.co/papers/2010.02502
+        # eta corresponds to η in DDIM paper: https://arxiv.org/abs/2010.02502
         # and should be between [0, 1]
 
         accepts_eta = "eta" in set(inspect.signature(self.scheduler.step).parameters.keys())
@@ -587,8 +573,8 @@ class StableDiffusionUpscalePipeline(
             num_images_per_prompt (`int`, *optional*, defaults to 1):
                 The number of images to generate per prompt.
             eta (`float`, *optional*, defaults to 0.0):
-                Corresponds to parameter eta (η) from the [DDIM](https://huggingface.co/papers/2010.02502) paper. Only
-                applies to the [`~schedulers.DDIMScheduler`], and is ignored in other schedulers.
+                Corresponds to parameter eta (η) from the [DDIM](https://arxiv.org/abs/2010.02502) paper. Only applies
+                to the [`~schedulers.DDIMScheduler`], and is ignored in other schedulers.
             generator (`torch.Generator` or `List[torch.Generator]`, *optional*):
                 A [`torch.Generator`](https://pytorch.org/docs/stable/generated/torch.Generator.html) to make
                 generation deterministic.
@@ -677,7 +663,7 @@ class StableDiffusionUpscalePipeline(
 
         device = self._execution_device
         # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
-        # of the Imagen paper: https://huggingface.co/papers/2205.11487 . `guidance_scale = 1`
+        # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
         # corresponds to doing no classifier free guidance.
         do_classifier_free_guidance = guidance_scale > 1.0
 
@@ -740,7 +726,7 @@ class StableDiffusionUpscalePipeline(
                 f"Incorrect configuration settings! The config of `pipeline.unet`: {self.unet.config} expects"
                 f" {self.unet.config.in_channels} but received `num_channels_latents`: {num_channels_latents} +"
                 f" `num_channels_image`: {num_channels_image} "
-                f" = {num_channels_latents + num_channels_image}. Please verify the config of"
+                f" = {num_channels_latents+num_channels_image}. Please verify the config of"
                 " `pipeline.unet` or your `image` input."
             )
 
@@ -782,9 +768,6 @@ class StableDiffusionUpscalePipeline(
                     if callback is not None and i % callback_steps == 0:
                         step_idx = i // getattr(self.scheduler, "order", 1)
                         callback(step_idx, t, latents)
-
-                if XLA_AVAILABLE:
-                    xm.mark_step()
 
         if not output_type == "latent":
             # make sure the VAE is in float32 mode, as it overflows in float16

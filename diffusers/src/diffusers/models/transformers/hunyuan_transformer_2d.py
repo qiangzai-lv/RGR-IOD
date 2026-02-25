@@ -1,4 +1,4 @@
-# Copyright 2025 HunyuanDiT Authors, Qixun Wang and The HuggingFace Team. All rights reserved.
+# Copyright 2024 HunyuanDiT Authors, Qixun Wang and The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -244,9 +244,6 @@ class HunyuanDiT2DModel(ModelMixin, ConfigMixin):
             Whether or not to use style condition and image meta size. True for version <=1.1, False for version >= 1.2
     """
 
-    _skip_layerwise_casting_patterns = ["pos_embed", "norm", "pooler"]
-    _supports_group_offloading = False
-
     @register_to_config
     def __init__(
         self,
@@ -280,7 +277,9 @@ class HunyuanDiT2DModel(ModelMixin, ConfigMixin):
             act_fn="silu_fp32",
         )
 
-        self.text_embedding_padding = nn.Parameter(torch.randn(text_len + text_len_t5, cross_attention_dim))
+        self.text_embedding_padding = nn.Parameter(
+            torch.randn(text_len + text_len_t5, cross_attention_dim, dtype=torch.float32)
+        )
 
         self.pos_embed = PatchEmbed(
             height=sample_size,
@@ -308,7 +307,7 @@ class HunyuanDiT2DModel(ModelMixin, ConfigMixin):
                     activation_fn=activation_fn,
                     ff_inner_dim=int(self.inner_dim * mlp_ratio),
                     cross_attention_dim=cross_attention_dim,
-                    qk_norm=True,  # See https://huggingface.co/papers/2302.05442 for details.
+                    qk_norm=True,  # See http://arxiv.org/abs/2302.05442 for details.
                     skip=layer > num_layers // 2,
                 )
                 for layer in range(num_layers)

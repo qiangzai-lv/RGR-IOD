@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 HuggingFace Inc.
+# Copyright 2024 HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -26,7 +26,6 @@ from diffusers.utils.testing_utils import (
     floats_tensor,
     load_image,
     nightly,
-    require_accelerator,
     require_torch,
     torch_device,
 )
@@ -94,7 +93,7 @@ class LDMSuperResolutionPipelineFastTests(unittest.TestCase):
 
         assert np.abs(image_slice.flatten() - expected_slice).max() < 1e-2
 
-    @require_accelerator
+    @unittest.skipIf(torch_device != "cuda", "This test requires a GPU")
     def test_inference_superresolution_fp16(self):
         unet = self.dummy_uncond_unet
         scheduler = DDIMScheduler()

@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 HuggingFace Inc.
+# Copyright 2024 HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,11 +22,10 @@ from transformers import CLIPTextConfig, CLIPTextModel, CLIPTokenizer
 
 from diffusers import AutoencoderKL, DDIMScheduler, LDMTextToImagePipeline, UNet2DConditionModel
 from diffusers.utils.testing_utils import (
-    backend_empty_cache,
     enable_full_determinism,
     load_numpy,
     nightly,
-    require_torch_accelerator,
+    require_torch_gpu,
     torch_device,
 )
 
@@ -137,17 +136,17 @@ class LDMTextToImagePipelineFastTests(PipelineTesterMixin, unittest.TestCase):
 
 
 @nightly
-@require_torch_accelerator
+@require_torch_gpu
 class LDMTextToImagePipelineSlowTests(unittest.TestCase):
     def setUp(self):
         super().setUp()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def tearDown(self):
         super().tearDown()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def get_inputs(self, device, dtype=torch.float32, seed=0):
         generator = torch.manual_seed(seed)
@@ -178,17 +177,17 @@ class LDMTextToImagePipelineSlowTests(unittest.TestCase):
 
 
 @nightly
-@require_torch_accelerator
+@require_torch_gpu
 class LDMTextToImagePipelineNightlyTests(unittest.TestCase):
     def setUp(self):
         super().setUp()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def tearDown(self):
         super().tearDown()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def get_inputs(self, device, dtype=torch.float32, seed=0):
         generator = torch.manual_seed(seed)

@@ -7,9 +7,8 @@ from transformers import AutoTokenizer, CLIPTextConfig, CLIPTextModelWithProject
 
 from diffusers import AutoencoderKL, FlowMatchEulerDiscreteScheduler, SD3Transformer2DModel, StableDiffusion3Pipeline
 from diffusers.utils.testing_utils import (
-    backend_empty_cache,
     numpy_cosine_similarity_distance,
-    require_big_accelerator,
+    require_torch_gpu,
     slow,
     torch_device,
 )
@@ -35,8 +34,6 @@ class StableDiffusion3PipelineFastTests(unittest.TestCase, PipelineTesterMixin):
         ]
     )
     batch_params = frozenset(["prompt", "negative_prompt"])
-    test_layerwise_casting = True
-    test_group_offloading = True
 
     def get_dummy_components(self):
         torch.manual_seed(0)
@@ -105,8 +102,6 @@ class StableDiffusion3PipelineFastTests(unittest.TestCase, PipelineTesterMixin):
             "tokenizer_3": tokenizer_3,
             "transformer": transformer,
             "vae": vae,
-            "image_encoder": None,
-            "feature_extractor": None,
         }
 
     def get_dummy_inputs(self, device, seed=0):
@@ -124,22 +119,70 @@ class StableDiffusion3PipelineFastTests(unittest.TestCase, PipelineTesterMixin):
         }
         return inputs
 
-    def test_inference(self):
-        components = self.get_dummy_components()
-        pipe = self.pipeline_class(**components)
+    def test_stable_diffusion_3_different_prompts(self):
+        pipe = self.pipeline_class(**self.get_dummy_components()).to(torch_device)
 
         inputs = self.get_dummy_inputs(torch_device)
-        image = pipe(**inputs).images[0]
-        generated_slice = image.flatten()
-        generated_slice = np.concatenate([generated_slice[:8], generated_slice[-8:]])
+        output_same_prompt = pipe(**inputs).images[0]
 
-        # fmt: off
-        expected_slice = np.array([0.5112, 0.5228, 0.5235, 0.5524, 0.3188, 0.5017, 0.5574, 0.4899, 0.6812, 0.5991, 0.3908, 0.5213, 0.5582, 0.4457, 0.4204, 0.5616])
-        # fmt: on
+        inputs = self.get_dummy_inputs(torch_device)
+        inputs["prompt_2"] = "a different prompt"
+        inputs["prompt_3"] = "another different prompt"
+        output_different_prompts = pipe(**inputs).images[0]
 
-        self.assertTrue(
-            np.allclose(generated_slice, expected_slice, atol=1e-3), "Output does not match expected slice."
+        max_diff = np.abs(output_same_prompt - output_different_prompts).max()
+
+        # Outputs should be different here
+        assert max_diff > 1e-2
+
+    def test_stable_diffusion_3_different_negative_prompts(self):
+        pipe = self.pipeline_class(**self.get_dummy_components()).to(torch_device)
+
+        inputs = self.get_dummy_inputs(torch_device)
+        output_same_prompt = pipe(**inputs).images[0]
+
+        inputs = self.get_dummy_inputs(torch_device)
+        inputs["negative_prompt_2"] = "deformed"
+        inputs["negative_prompt_3"] = "blurry"
+        output_different_prompts = pipe(**inputs).images[0]
+
+        max_diff = np.abs(output_same_prompt - output_different_prompts).max()
+
+        # Outputs should be different here
+        assert max_diff > 1e-2
+
+    def test_stable_diffusion_3_prompt_embeds(self):
+        pipe = self.pipeline_class(**self.get_dummy_components()).to(torch_device)
+        inputs = self.get_dummy_inputs(torch_device)
+
+        output_with_prompt = pipe(**inputs).images[0]
+
+        inputs = self.get_dummy_inputs(torch_device)
+        prompt = inputs.pop("prompt")
+
+        do_classifier_free_guidance = inputs["guidance_scale"] > 1
+        (
+            prompt_embeds,
+            negative_prompt_embeds,
+            pooled_prompt_embeds,
+            negative_pooled_prompt_embeds,
+        ) = pipe.encode_prompt(
+            prompt,
+            prompt_2=None,
+            prompt_3=None,
+            do_classifier_free_guidance=do_classifier_free_guidance,
+            device=torch_device,
         )
+        output_with_embeds = pipe(
+            prompt_embeds=prompt_embeds,
+            negative_prompt_embeds=negative_prompt_embeds,
+            pooled_prompt_embeds=pooled_prompt_embeds,
+            negative_pooled_prompt_embeds=negative_pooled_prompt_embeds,
+            **inputs,
+        ).images[0]
+
+        max_diff = np.abs(output_with_prompt - output_with_embeds).max()
+        assert max_diff < 1e-4
 
     def test_fused_qkv_projections(self):
         device = "cpu"  # ensure determinism for the device-dependent torch.Generator
@@ -155,9 +198,9 @@ class StableDiffusion3PipelineFastTests(unittest.TestCase, PipelineTesterMixin):
         # TODO (sayakpaul): will refactor this once `fuse_qkv_projections()` has been added
         # to the pipeline level.
         pipe.transformer.fuse_qkv_projections()
-        assert check_qkv_fusion_processors_exist(pipe.transformer), (
-            "Something wrong with the fused attention processors. Expected all the attention processors to be fused."
-        )
+        assert check_qkv_fusion_processors_exist(
+            pipe.transformer
+        ), "Something wrong with the fused attention processors. Expected all the attention processors to be fused."
         assert check_qkv_fusion_matches_attn_procs_length(
             pipe.transformer, pipe.transformer.original_attn_processors
         ), "Something wrong with the attention processors concerning the fused QKV projections."
@@ -171,52 +214,19 @@ class StableDiffusion3PipelineFastTests(unittest.TestCase, PipelineTesterMixin):
         image = pipe(**inputs).images
         image_slice_disabled = image[0, -3:, -3:, -1]
 
-        assert np.allclose(original_image_slice, image_slice_fused, atol=1e-3, rtol=1e-3), (
-            "Fusion of QKV projections shouldn't affect the outputs."
-        )
-        assert np.allclose(image_slice_fused, image_slice_disabled, atol=1e-3, rtol=1e-3), (
-            "Outputs, with QKV projection fusion enabled, shouldn't change when fused QKV projections are disabled."
-        )
-        assert np.allclose(original_image_slice, image_slice_disabled, atol=1e-2, rtol=1e-2), (
-            "Original outputs should match when fused QKV projections are disabled."
-        )
-
-    def test_skip_guidance_layers(self):
-        components = self.get_dummy_components()
-        pipe = self.pipeline_class(**components)
-        pipe = pipe.to(torch_device)
-        pipe.set_progress_bar_config(disable=None)
-
-        inputs = self.get_dummy_inputs(torch_device)
-
-        output_full = pipe(**inputs)[0]
-
-        inputs_with_skip = inputs.copy()
-        inputs_with_skip["skip_guidance_layers"] = [0]
-        output_skip = pipe(**inputs_with_skip)[0]
-
-        self.assertFalse(
-            np.allclose(output_full, output_skip, atol=1e-5), "Outputs should differ when layers are skipped"
-        )
-
-        self.assertEqual(output_full.shape, output_skip.shape, "Outputs should have the same shape")
-
-        inputs["num_images_per_prompt"] = 2
-        output_full = pipe(**inputs)[0]
-
-        inputs_with_skip = inputs.copy()
-        inputs_with_skip["skip_guidance_layers"] = [0]
-        output_skip = pipe(**inputs_with_skip)[0]
-
-        self.assertFalse(
-            np.allclose(output_full, output_skip, atol=1e-5), "Outputs should differ when layers are skipped"
-        )
-
-        self.assertEqual(output_full.shape, output_skip.shape, "Outputs should have the same shape")
+        assert np.allclose(
+            original_image_slice, image_slice_fused, atol=1e-3, rtol=1e-3
+        ), "Fusion of QKV projections shouldn't affect the outputs."
+        assert np.allclose(
+            image_slice_fused, image_slice_disabled, atol=1e-3, rtol=1e-3
+        ), "Outputs, with QKV projection fusion enabled, shouldn't change when fused QKV projections are disabled."
+        assert np.allclose(
+            original_image_slice, image_slice_disabled, atol=1e-2, rtol=1e-2
+        ), "Original outputs should match when fused QKV projections are disabled."
 
 
 @slow
-@require_big_accelerator
+@require_torch_gpu
 class StableDiffusion3PipelineSlowTests(unittest.TestCase):
     pipeline_class = StableDiffusion3Pipeline
     repo_id = "stabilityai/stable-diffusion-3-medium-diffusers"
@@ -224,12 +234,12 @@ class StableDiffusion3PipelineSlowTests(unittest.TestCase):
     def setUp(self):
         super().setUp()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def tearDown(self):
         super().tearDown()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def get_inputs(self, device, seed=0):
         if str(device).startswith("mps"):
@@ -247,15 +257,46 @@ class StableDiffusion3PipelineSlowTests(unittest.TestCase):
 
     def test_sd3_inference(self):
         pipe = self.pipeline_class.from_pretrained(self.repo_id, torch_dtype=torch.float16)
-        pipe.enable_model_cpu_offload(device=torch_device)
+        pipe.enable_model_cpu_offload()
 
         inputs = self.get_inputs(torch_device)
 
         image = pipe(**inputs).images[0]
         image_slice = image[0, :10, :10]
-        # fmt: off
-        expected_slice = np.array([0.4648, 0.4404, 0.4177, 0.5063, 0.4800, 0.4287, 0.5425, 0.5190, 0.4717, 0.5430, 0.5195, 0.4766, 0.5361, 0.5122, 0.4612, 0.4871, 0.4749, 0.4058, 0.4756, 0.4678, 0.3804, 0.4832, 0.4822, 0.3799, 0.5103, 0.5034, 0.3953, 0.5073, 0.4839, 0.3884])
-        # fmt: on
+        expected_slice = np.array(
+            [
+                0.4648,
+                0.4404,
+                0.4177,
+                0.5063,
+                0.4800,
+                0.4287,
+                0.5425,
+                0.5190,
+                0.4717,
+                0.5430,
+                0.5195,
+                0.4766,
+                0.5361,
+                0.5122,
+                0.4612,
+                0.4871,
+                0.4749,
+                0.4058,
+                0.4756,
+                0.4678,
+                0.3804,
+                0.4832,
+                0.4822,
+                0.3799,
+                0.5103,
+                0.5034,
+                0.3953,
+                0.5073,
+                0.4839,
+                0.3884,
+            ]
+        )
 
         max_diff = numpy_cosine_similarity_distance(expected_slice.flatten(), image_slice.flatten())
 

@@ -1,4 +1,4 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
+# Copyright 2024 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,9 +17,7 @@ import torch
 import torch.nn as nn
 
 from ...configuration_utils import ConfigMixin, register_to_config
-from ...loaders import PeftAdapterMixin
 from ...loaders.single_file_model import FromOriginalModelMixin
-from ...utils import deprecate
 from ...utils.accelerate_utils import apply_forward_hook
 from ..attention_processor import (
     ADDED_KV_ATTENTION_PROCESSORS,
@@ -35,7 +33,7 @@ from ..modeling_utils import ModelMixin
 from .vae import Decoder, DecoderOutput, DiagonalGaussianDistribution, Encoder
 
 
-class AutoencoderKL(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapterMixin):
+class AutoencoderKL(ModelMixin, ConfigMixin, FromOriginalModelMixin):
     r"""
     A VAE model with KL loss for encoding images into latents and decoding latent representations into images.
 
@@ -60,11 +58,11 @@ class AutoencoderKL(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapter
             model. The latents are scaled with the formula `z = z * scaling_factor` before being passed to the
             diffusion model. When decoding, the latents are scaled back to the original scale with the formula: `z = 1
             / scaling_factor * z`. For more details, refer to sections 4.3.2 and D.1 of the [High-Resolution Image
-            Synthesis with Latent Diffusion Models](https://huggingface.co/papers/2112.10752) paper.
+            Synthesis with Latent Diffusion Models](https://arxiv.org/abs/2112.10752) paper.
         force_upcast (`bool`, *optional*, default to `True`):
             If enabled it will force the VAE to run in float32 for high image resolution pipelines, such as SD-XL. VAE
-            can be fine-tuned / trained to a lower range without losing too much precision in which case `force_upcast`
-            can be set to `False` - see: https://huggingface.co/madebyollin/sdxl-vae-fp16-fix
+            can be fine-tuned / trained to a lower range without loosing too much precision in which case
+            `force_upcast` can be set to `False` - see: https://huggingface.co/madebyollin/sdxl-vae-fp16-fix
         mid_block_add_attention (`bool`, *optional*, default to `True`):
             If enabled, the mid_block of the Encoder and Decoder will have attention blocks. If set to false, the
             mid_block will only have resnet blocks
@@ -90,7 +88,7 @@ class AutoencoderKL(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapter
         shift_factor: Optional[float] = None,
         latents_mean: Optional[Tuple[float]] = None,
         latents_std: Optional[Tuple[float]] = None,
-        force_upcast: bool = True,
+        force_upcast: float = True,
         use_quant_conv: bool = True,
         use_post_quant_conv: bool = True,
         mid_block_add_attention: bool = True,
@@ -137,6 +135,10 @@ class AutoencoderKL(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapter
         )
         self.tile_latent_min_size = int(sample_size / (2 ** (len(self.config.block_out_channels) - 1)))
         self.tile_overlap_factor = 0.25
+
+    def _set_gradient_checkpointing(self, module, value=False):
+        if isinstance(module, (Encoder, Decoder)):
+            module.gradient_checkpointing = value
 
     def enable_tiling(self, use_tiling: bool = True):
         r"""
@@ -243,18 +245,6 @@ class AutoencoderKL(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapter
 
         self.set_attn_processor(processor)
 
-    def _encode(self, x: torch.Tensor) -> torch.Tensor:
-        batch_size, num_channels, height, width = x.shape
-
-        if self.use_tiling and (width > self.tile_sample_min_size or height > self.tile_sample_min_size):
-            return self._tiled_encode(x)
-
-        enc = self.encoder(x)
-        if self.quant_conv is not None:
-            enc = self.quant_conv(enc)
-
-        return enc
-
     @apply_forward_hook
     def encode(
         self, x: torch.Tensor, return_dict: bool = True
@@ -271,13 +261,21 @@ class AutoencoderKL(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapter
                 The latent representations of the encoded images. If `return_dict` is True, a
                 [`~models.autoencoder_kl.AutoencoderKLOutput`] is returned, otherwise a plain `tuple` is returned.
         """
+        if self.use_tiling and (x.shape[-1] > self.tile_sample_min_size or x.shape[-2] > self.tile_sample_min_size):
+            return self.tiled_encode(x, return_dict=return_dict)
+
         if self.use_slicing and x.shape[0] > 1:
-            encoded_slices = [self._encode(x_slice) for x_slice in x.split(1)]
+            encoded_slices = [self.encoder(x_slice) for x_slice in x.split(1)]
             h = torch.cat(encoded_slices)
         else:
-            h = self._encode(x)
+            h = self.encoder(x)
 
-        posterior = DiagonalGaussianDistribution(h)
+        if self.quant_conv is not None:
+            moments = self.quant_conv(h)
+        else:
+            moments = h
+
+        posterior = DiagonalGaussianDistribution(moments)
 
         if not return_dict:
             return (posterior,)
@@ -339,54 +337,6 @@ class AutoencoderKL(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapter
             b[:, :, :, x] = a[:, :, :, -blend_extent + x] * (1 - x / blend_extent) + b[:, :, :, x] * (x / blend_extent)
         return b
 
-    def _tiled_encode(self, x: torch.Tensor) -> torch.Tensor:
-        r"""Encode a batch of images using a tiled encoder.
-
-        When this option is enabled, the VAE will split the input tensor into tiles to compute encoding in several
-        steps. This is useful to keep memory use constant regardless of image size. The end result of tiled encoding is
-        different from non-tiled encoding because each tile uses a different encoder. To avoid tiling artifacts, the
-        tiles overlap and are blended together to form a smooth output. You may still see tile-sized changes in the
-        output, but they should be much less noticeable.
-
-        Args:
-            x (`torch.Tensor`): Input batch of images.
-
-        Returns:
-            `torch.Tensor`:
-                The latent representation of the encoded videos.
-        """
-
-        overlap_size = int(self.tile_sample_min_size * (1 - self.tile_overlap_factor))
-        blend_extent = int(self.tile_latent_min_size * self.tile_overlap_factor)
-        row_limit = self.tile_latent_min_size - blend_extent
-
-        # Split the image into 512x512 tiles and encode them separately.
-        rows = []
-        for i in range(0, x.shape[2], overlap_size):
-            row = []
-            for j in range(0, x.shape[3], overlap_size):
-                tile = x[:, :, i : i + self.tile_sample_min_size, j : j + self.tile_sample_min_size]
-                tile = self.encoder(tile)
-                if self.config.use_quant_conv:
-                    tile = self.quant_conv(tile)
-                row.append(tile)
-            rows.append(row)
-        result_rows = []
-        for i, row in enumerate(rows):
-            result_row = []
-            for j, tile in enumerate(row):
-                # blend the above tile and the left tile
-                # to the current tile and add the current tile to the result row
-                if i > 0:
-                    tile = self.blend_v(rows[i - 1][j], tile, blend_extent)
-                if j > 0:
-                    tile = self.blend_h(row[j - 1], tile, blend_extent)
-                result_row.append(tile[:, :, :row_limit, :row_limit])
-            result_rows.append(torch.cat(result_row, dim=3))
-
-        enc = torch.cat(result_rows, dim=2)
-        return enc
-
     def tiled_encode(self, x: torch.Tensor, return_dict: bool = True) -> AutoencoderKLOutput:
         r"""Encode a batch of images using a tiled encoder.
 
@@ -406,13 +356,6 @@ class AutoencoderKL(ModelMixin, ConfigMixin, FromOriginalModelMixin, PeftAdapter
                 If return_dict is True, a [`~models.autoencoder_kl.AutoencoderKLOutput`] is returned, otherwise a plain
                 `tuple` is returned.
         """
-        deprecation_message = (
-            "The tiled_encode implementation supporting the `return_dict` parameter is deprecated. In the future, the "
-            "implementation of this method will be replaced with that of `_tiled_encode` and you will no longer be able "
-            "to pass `return_dict`. You will also have to create a `DiagonalGaussianDistribution()` from the returned value."
-        )
-        deprecate("tiled_encode", "1.0.0", deprecation_message, standard_warn=False)
-
         overlap_size = int(self.tile_sample_min_size * (1 - self.tile_overlap_factor))
         blend_extent = int(self.tile_latent_min_size * self.tile_overlap_factor)
         row_limit = self.tile_latent_min_size - blend_extent

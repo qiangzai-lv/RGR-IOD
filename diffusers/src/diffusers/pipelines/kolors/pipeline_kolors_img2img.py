@@ -1,4 +1,4 @@
-# Copyright 2025 Stability AI, Kwai-Kolors Team and The HuggingFace Team. All rights reserved.
+# Copyright 2024 Stability AI, Kwai-Kolors Team and The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ from ...models import AutoencoderKL, ImageProjection, UNet2DConditionModel
 from ...models.attention_processor import AttnProcessor2_0, FusedAttnProcessor2_0, XFormersAttnProcessor
 from ...schedulers import KarrasDiffusionSchedulers
 from ...utils import is_torch_xla_available, logging, replace_example_docstring
-from ...utils.torch_utils import empty_device_cache, randn_tensor
+from ...utils.torch_utils import randn_tensor
 from ..pipeline_utils import DiffusionPipeline, StableDiffusionMixin
 from .pipeline_output import KolorsPipelineOutput
 from .text_encoder import ChatGLMModel
@@ -89,7 +89,7 @@ def retrieve_timesteps(
     sigmas: Optional[List[float]] = None,
     **kwargs,
 ):
-    r"""
+    """
     Calls the scheduler's `set_timesteps` method and retrieves timesteps from the scheduler after the call. Handles
     custom timesteps. Any kwargs will be supplied to `scheduler.set_timesteps`.
 
@@ -207,14 +207,12 @@ class KolorsImg2ImgPipeline(DiffusionPipeline, StableDiffusionMixin, StableDiffu
             feature_extractor=feature_extractor,
         )
         self.register_to_config(force_zeros_for_empty_prompt=force_zeros_for_empty_prompt)
-        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1) if getattr(self, "vae", None) else 8
+        self.vae_scale_factor = (
+            2 ** (len(self.vae.config.block_out_channels) - 1) if hasattr(self, "vae") and self.vae is not None else 8
+        )
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
 
-        self.default_sample_size = (
-            self.unet.config.sample_size
-            if hasattr(self, "unet") and self.unet is not None and hasattr(self.unet.config, "sample_size")
-            else 128
-        )
+        self.default_sample_size = self.unet.config.sample_size
 
     # Copied from diffusers.pipelines.kolors.pipeline_kolors.KolorsPipeline.encode_prompt
     def encode_prompt(
@@ -456,7 +454,7 @@ class KolorsImg2ImgPipeline(DiffusionPipeline, StableDiffusionMixin, StableDiffu
     def prepare_extra_step_kwargs(self, generator, eta):
         # prepare extra kwargs for the scheduler step, since not all schedulers have the same signature
         # eta (η) is only used with the DDIMScheduler, it will be ignored for other schedulers.
-        # eta corresponds to η in DDIM paper: https://huggingface.co/papers/2010.02502
+        # eta corresponds to η in DDIM paper: https://arxiv.org/abs/2010.02502
         # and should be between [0, 1]
 
         accepts_eta = "eta" in set(inspect.signature(self.scheduler.step).parameters.keys())
@@ -618,7 +616,7 @@ class KolorsImg2ImgPipeline(DiffusionPipeline, StableDiffusionMixin, StableDiffu
         # Offload text encoder if `enable_model_cpu_offload` was enabled
         if hasattr(self, "final_offload_hook") and self.final_offload_hook is not None:
             self.text_encoder_2.to("cpu")
-            empty_device_cache()
+            torch.cuda.empty_cache()
 
         image = image.to(device=device, dtype=dtype)
 
@@ -761,7 +759,7 @@ class KolorsImg2ImgPipeline(DiffusionPipeline, StableDiffusionMixin, StableDiffu
         return self._guidance_scale
 
     # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
-    # of the Imagen paper: https://huggingface.co/papers/2205.11487 . `guidance_scale = 1`
+    # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
     # corresponds to doing no classifier free guidance.
     @property
     def do_classifier_free_guidance(self):
@@ -880,11 +878,11 @@ class KolorsImg2ImgPipeline(DiffusionPipeline, StableDiffusionMixin, StableDiffu
                 "Mixture of Denoisers" multi-pipeline setup, as elaborated in [**Refining the Image
                 Output**](https://huggingface.co/docs/diffusers/api/pipelines/stable_diffusion/stable_diffusion_xl#refining-the-image-output)
             guidance_scale (`float`, *optional*, defaults to 5.0):
-                Guidance scale as defined in [Classifier-Free Diffusion
-                Guidance](https://huggingface.co/papers/2207.12598). `guidance_scale` is defined as `w` of equation 2.
-                of [Imagen Paper](https://huggingface.co/papers/2205.11487). Guidance scale is enabled by setting
-                `guidance_scale > 1`. Higher guidance scale encourages to generate images that are closely linked to
-                the text `prompt`, usually at the expense of lower image quality.
+                Guidance scale as defined in [Classifier-Free Diffusion Guidance](https://arxiv.org/abs/2207.12598).
+                `guidance_scale` is defined as `w` of equation 2. of [Imagen
+                Paper](https://arxiv.org/pdf/2205.11487.pdf). Guidance scale is enabled by setting `guidance_scale >
+                1`. Higher guidance scale encourages to generate images that are closely linked to the text `prompt`,
+                usually at the expense of lower image quality.
             negative_prompt (`str` or `List[str]`, *optional*):
                 The prompt or prompts not to guide the image generation. If not defined, one has to pass
                 `negative_prompt_embeds` instead. Ignored when not using guidance (i.e., ignored if `guidance_scale` is
@@ -892,8 +890,8 @@ class KolorsImg2ImgPipeline(DiffusionPipeline, StableDiffusionMixin, StableDiffu
             num_images_per_prompt (`int`, *optional*, defaults to 1):
                 The number of images to generate per prompt.
             eta (`float`, *optional*, defaults to 0.0):
-                Corresponds to parameter eta (η) in the DDIM paper: https://huggingface.co/papers/2010.02502. Only
-                applies to [`schedulers.DDIMScheduler`], will be ignored for others.
+                Corresponds to parameter eta (η) in the DDIM paper: https://arxiv.org/abs/2010.02502. Only applies to
+                [`schedulers.DDIMScheduler`], will be ignored for others.
             generator (`torch.Generator` or `List[torch.Generator]`, *optional*):
                 One or a list of [torch generator(s)](https://pytorch.org/docs/stable/generated/torch.Generator.html)
                 to make generation deterministic.

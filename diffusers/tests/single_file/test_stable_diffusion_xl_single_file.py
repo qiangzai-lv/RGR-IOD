@@ -7,11 +7,9 @@ from diffusers import (
     StableDiffusionXLPipeline,
 )
 from diffusers.utils.testing_utils import (
-    backend_empty_cache,
     enable_full_determinism,
-    require_torch_accelerator,
+    require_torch_gpu,
     slow,
-    torch_device,
 )
 
 from .single_file_testing_utils import SDXLSingleFileTesterMixin
@@ -21,7 +19,7 @@ enable_full_determinism()
 
 
 @slow
-@require_torch_accelerator
+@require_torch_gpu
 class StableDiffusionXLPipelineSingleFileSlowTests(unittest.TestCase, SDXLSingleFileTesterMixin):
     pipeline_class = StableDiffusionXLPipeline
     ckpt_path = "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/sd_xl_base_1.0.safetensors"
@@ -33,12 +31,12 @@ class StableDiffusionXLPipelineSingleFileSlowTests(unittest.TestCase, SDXLSingle
     def setUp(self):
         super().setUp()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def tearDown(self):
         super().tearDown()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def get_inputs(self, device, generator_device="cpu", dtype=torch.float32, seed=0):
         generator = torch.Generator(device=generator_device).manual_seed(seed)

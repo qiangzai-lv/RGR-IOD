@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 Latte Team and HuggingFace Inc.
+# Copyright 2024 Latte Team and HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,36 +25,26 @@ from transformers import AutoTokenizer, T5EncoderModel
 from diffusers import (
     AutoencoderKL,
     DDIMScheduler,
-    FasterCacheConfig,
     LattePipeline,
     LatteTransformer3DModel,
-    PyramidAttentionBroadcastConfig,
 )
 from diffusers.utils.import_utils import is_xformers_available
 from diffusers.utils.testing_utils import (
-    backend_empty_cache,
     enable_full_determinism,
     numpy_cosine_similarity_distance,
-    require_torch_accelerator,
+    require_torch_gpu,
     slow,
     torch_device,
 )
 
 from ..pipeline_params import TEXT_TO_IMAGE_BATCH_PARAMS, TEXT_TO_IMAGE_IMAGE_PARAMS, TEXT_TO_IMAGE_PARAMS
-from ..test_pipelines_common import (
-    FasterCacheTesterMixin,
-    PipelineTesterMixin,
-    PyramidAttentionBroadcastTesterMixin,
-    to_np,
-)
+from ..test_pipelines_common import PipelineTesterMixin, to_np
 
 
 enable_full_determinism()
 
 
-class LattePipelineFastTests(
-    PipelineTesterMixin, PyramidAttentionBroadcastTesterMixin, FasterCacheTesterMixin, unittest.TestCase
-):
+class LattePipelineFastTests(PipelineTesterMixin, unittest.TestCase):
     pipeline_class = LattePipeline
     params = TEXT_TO_IMAGE_PARAMS - {"cross_attention_kwargs"}
     batch_params = TEXT_TO_IMAGE_BATCH_PARAMS
@@ -62,35 +52,12 @@ class LattePipelineFastTests(
     image_latents_params = TEXT_TO_IMAGE_IMAGE_PARAMS
 
     required_optional_params = PipelineTesterMixin.required_optional_params
-    test_layerwise_casting = True
-    test_group_offloading = True
 
-    pab_config = PyramidAttentionBroadcastConfig(
-        spatial_attention_block_skip_range=2,
-        temporal_attention_block_skip_range=2,
-        cross_attention_block_skip_range=2,
-        spatial_attention_timestep_skip_range=(100, 700),
-        temporal_attention_timestep_skip_range=(100, 800),
-        cross_attention_timestep_skip_range=(100, 800),
-        spatial_attention_block_identifiers=["transformer_blocks"],
-        temporal_attention_block_identifiers=["temporal_transformer_blocks"],
-        cross_attention_block_identifiers=["transformer_blocks"],
-    )
-
-    faster_cache_config = FasterCacheConfig(
-        spatial_attention_block_skip_range=2,
-        temporal_attention_block_skip_range=2,
-        spatial_attention_timestep_skip_range=(-1, 901),
-        temporal_attention_timestep_skip_range=(-1, 901),
-        unconditional_batch_skip_range=2,
-        attention_weight_callback=lambda _: 0.5,
-    )
-
-    def get_dummy_components(self, num_layers: int = 1):
+    def get_dummy_components(self):
         torch.manual_seed(0)
         transformer = LatteTransformer3DModel(
             sample_size=8,
-            num_layers=num_layers,
+            num_layers=1,
             patch_size=2,
             attention_head_dim=8,
             num_attention_heads=3,
@@ -220,19 +187,7 @@ class LattePipelineFastTests(
     def test_inference_batch_single_identical(self):
         self._test_inference_batch_single_identical(batch_size=3, expected_max_diff=1e-3)
 
-    @unittest.skip("Not supported.")
     def test_attention_slicing_forward_pass(self):
-        pass
-
-    @unittest.skipIf(
-        torch_device != "cuda" or not is_xformers_available(),
-        reason="XFormers attention is only available with CUDA and `xformers` installed",
-    )
-    def test_xformers_attention_forwardGenerator_pass(self):
-        super()._test_xformers_attention_forwardGenerator_pass(test_mean_pixel_difference=False)
-
-    @unittest.skip("Test not supported because `encode_prompt()` has multiple returns.")
-    def test_encode_prompt_works_in_isolation(self):
         pass
 
     def test_save_load_optional_components(self):
@@ -302,27 +257,34 @@ class LattePipelineFastTests(
         max_diff = np.abs(to_np(output) - to_np(output_loaded)).max()
         self.assertLess(max_diff, 1.0)
 
+    @unittest.skipIf(
+        torch_device != "cuda" or not is_xformers_available(),
+        reason="XFormers attention is only available with CUDA and `xformers` installed",
+    )
+    def test_xformers_attention_forwardGenerator_pass(self):
+        super()._test_xformers_attention_forwardGenerator_pass(test_mean_pixel_difference=False)
+
 
 @slow
-@require_torch_accelerator
+@require_torch_gpu
 class LattePipelineIntegrationTests(unittest.TestCase):
     prompt = "A painting of a squirrel eating a burger."
 
     def setUp(self):
         super().setUp()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def tearDown(self):
         super().tearDown()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def test_latte(self):
         generator = torch.Generator("cpu").manual_seed(0)
 
         pipe = LattePipeline.from_pretrained("maxin-cn/Latte-1", torch_dtype=torch.float16)
-        pipe.enable_model_cpu_offload(device=torch_device)
+        pipe.enable_model_cpu_offload()
         prompt = self.prompt
 
         videos = pipe(

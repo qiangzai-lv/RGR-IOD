@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 HuggingFace Inc.
+# Copyright 2024 HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -132,6 +132,7 @@ class PriorTransformerTests(ModelTesterMixin, unittest.TestCase):
             output = model(**input)[0]
 
         output_slice = output[0, :5].flatten().cpu()
+        print(output_slice)
 
         # Since the VAE Gaussian prior's generator is seeded on the appropriate device,
         # the expected output slices are not the same for CPU and GPU.
@@ -181,6 +182,7 @@ class PriorTransformerIntegrationTests(unittest.TestCase):
         assert list(sample.shape) == [1, 768]
 
         output_slice = sample[0, :8].flatten().cpu()
+        print(output_slice)
         expected_output_slice = torch.tensor(expected_slice)
 
         assert torch_all_close(output_slice, expected_output_slice, atol=1e-3)

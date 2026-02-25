@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 The HuggingFace Inc. team.
+# Copyright 2024 The HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -252,7 +252,7 @@ def sort_imports(file: str, check_only: bool = True):
         code, start_prompt="_import_structure = {", end_prompt="if TYPE_CHECKING:"
     )
 
-    # We ignore block 0 (everything until start_prompt) and the last block (everything after end_prompt).
+    # We ignore block 0 (everything untils start_prompt) and the last block (everything after end_prompt).
     for block_idx in range(1, len(main_blocks) - 1):
         # Check if the block contains some `_import_structure`s thingy to sort.
         block = main_blocks[block_idx]

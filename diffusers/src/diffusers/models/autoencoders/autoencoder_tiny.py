@@ -1,4 +1,4 @@
-# Copyright 2025 Ollin Boer Bohan and The HuggingFace Team. All rights reserved.
+# Copyright 2024 Ollin Boer Bohan and The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -83,8 +83,8 @@ class AutoencoderTiny(ModelMixin, ConfigMixin):
             model. The latents are scaled with the formula `z = z * scaling_factor` before being passed to the
             diffusion model. When decoding, the latents are scaled back to the original scale with the formula: `z = 1
             / scaling_factor * z`. For more details, refer to sections 4.3.2 and D.1 of the [High-Resolution Image
-            Synthesis with Latent Diffusion Models](https://huggingface.co/papers/2112.10752) paper. For this
-            Autoencoder, however, no such scaling factor was used, hence the value of 1.0 as the default.
+            Synthesis with Latent Diffusion Models](https://arxiv.org/abs/2112.10752) paper. For this Autoencoder,
+            however, no such scaling factor was used, hence the value of 1.0 as the default.
         force_upcast (`bool`, *optional*, default to `False`):
             If enabled it will force the VAE to run in float32 for high image resolution pipelines, such as SD-XL. VAE
             can be fine-tuned / trained to a lower range without losing too much precision, in which case
@@ -153,6 +153,10 @@ class AutoencoderTiny(ModelMixin, ConfigMixin):
 
         self.register_to_config(block_out_channels=decoder_block_out_channels)
         self.register_to_config(force_upcast=False)
+
+    def _set_gradient_checkpointing(self, module, value: bool = False) -> None:
+        if isinstance(module, (EncoderTiny, DecoderTiny)):
+            module.gradient_checkpointing = value
 
     def scale_latents(self, x: torch.Tensor) -> torch.Tensor:
         """raw latents -> [0, 1]"""
@@ -306,9 +310,7 @@ class AutoencoderTiny(ModelMixin, ConfigMixin):
         self, x: torch.Tensor, generator: Optional[torch.Generator] = None, return_dict: bool = True
     ) -> Union[DecoderOutput, Tuple[torch.Tensor]]:
         if self.use_slicing and x.shape[0] > 1:
-            output = [
-                self._tiled_decode(x_slice) if self.use_tiling else self.decoder(x_slice) for x_slice in x.split(1)
-            ]
+            output = [self._tiled_decode(x_slice) if self.use_tiling else self.decoder(x) for x_slice in x.split(1)]
             output = torch.cat(output)
         else:
             output = self._tiled_decode(x) if self.use_tiling else self.decoder(x)
@@ -339,7 +341,7 @@ class AutoencoderTiny(ModelMixin, ConfigMixin):
         # as if we were loading the latents from an RGBA uint8 image.
         unscaled_enc = self.unscale_latents(scaled_enc / 255.0)
 
-        dec = self.decode(unscaled_enc).sample
+        dec = self.decode(unscaled_enc)
 
         if not return_dict:
             return (dec,)

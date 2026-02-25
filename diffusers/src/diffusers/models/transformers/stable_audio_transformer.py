@@ -1,4 +1,4 @@
-# Copyright 2025 Stability AI and The HuggingFace Team. All rights reserved.
+# Copyright 2024 Stability AI and The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 # limitations under the License.
 
 
-from typing import Dict, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 import numpy as np
 import torch
@@ -21,12 +21,16 @@ import torch.nn as nn
 import torch.utils.checkpoint
 
 from ...configuration_utils import ConfigMixin, register_to_config
-from ...utils import logging
+from ...models.attention import FeedForward
+from ...models.attention_processor import (
+    Attention,
+    AttentionProcessor,
+    StableAudioAttnProcessor2_0,
+)
+from ...models.modeling_utils import ModelMixin
+from ...models.transformers.transformer_2d import Transformer2DModelOutput
+from ...utils import is_torch_version, logging
 from ...utils.torch_utils import maybe_allow_in_graph
-from ..attention import FeedForward
-from ..attention_processor import Attention, AttentionProcessor, StableAudioAttnProcessor2_0
-from ..modeling_utils import ModelMixin
-from ..transformers.transformer_2d import Transformer2DModelOutput
 
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
@@ -207,7 +211,6 @@ class StableAudioDiTModel(ModelMixin, ConfigMixin):
     """
 
     _supports_gradient_checkpointing = True
-    _skip_layerwise_casting_patterns = ["preprocess_conv", "postprocess_conv", "^proj_in$", "^proj_out$", "norm"]
 
     @register_to_config
     def __init__(
@@ -342,6 +345,10 @@ class StableAudioDiTModel(ModelMixin, ConfigMixin):
         """
         self.set_attn_processor(StableAudioAttnProcessor2_0())
 
+    def _set_gradient_checkpointing(self, module, value=False):
+        if hasattr(module, "gradient_checkpointing"):
+            module.gradient_checkpointing = value
+
     def forward(
         self,
         hidden_states: torch.FloatTensor,
@@ -407,14 +414,26 @@ class StableAudioDiTModel(ModelMixin, ConfigMixin):
             attention_mask = torch.cat([prepend_mask, attention_mask], dim=-1)
 
         for block in self.transformer_blocks:
-            if torch.is_grad_enabled() and self.gradient_checkpointing:
-                hidden_states = self._gradient_checkpointing_func(
-                    block,
+            if self.training and self.gradient_checkpointing:
+
+                def create_custom_forward(module, return_dict=None):
+                    def custom_forward(*inputs):
+                        if return_dict is not None:
+                            return module(*inputs, return_dict=return_dict)
+                        else:
+                            return module(*inputs)
+
+                    return custom_forward
+
+                ckpt_kwargs: Dict[str, Any] = {"use_reentrant": False} if is_torch_version(">=", "1.11.0") else {}
+                hidden_states = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(block),
                     hidden_states,
                     attention_mask,
                     cross_attention_hidden_states,
                     encoder_attention_mask,
                     rotary_embedding,
+                    **ckpt_kwargs,
                 )
 
             else:

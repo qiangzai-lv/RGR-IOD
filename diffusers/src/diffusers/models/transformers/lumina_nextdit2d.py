@@ -1,4 +1,4 @@
-# Copyright 2025 Alpha-VLLM Authors and The HuggingFace Team. All rights reserved.
+# Copyright 2024 Alpha-VLLM Authors and The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -43,7 +43,7 @@ class LuminaNextDiTBlock(nn.Module):
         num_kv_heads (`int`):
             Number of attention heads in key and value features (if using GQA), or set to None for the same as query.
         multiple_of (`int`): The number of multiple of ffn layer.
-        ffn_dim_multiplier (`float`): The multiplier factor of ffn layer dimension.
+        ffn_dim_multiplier (`float`): The multipier factor of ffn layer dimension.
         norm_eps (`float`): The eps for norm layer.
         qk_norm (`bool`): normalization for query and key.
         cross_attention_dim (`int`): Cross attention embedding dimension of the input text prompt hidden_states.
@@ -98,7 +98,7 @@ class LuminaNextDiTBlock(nn.Module):
 
         self.feed_forward = LuminaFeedForward(
             dim=dim,
-            inner_dim=int(4 * 2 * dim / 3),
+            inner_dim=4 * dim,
             multiple_of=multiple_of,
             ffn_dim_multiplier=ffn_dim_multiplier,
         )
@@ -220,8 +220,6 @@ class LuminaNextDiT2DModel(ModelMixin, ConfigMixin):
             A scaling factor applied to certain parameters or layers in the model. This can be used for adjusting the
             overall scale of the model's operations.
     """
-
-    _skip_layerwise_casting_patterns = ["patch_embedder", "norm", "ffn_norm"]
 
     @register_to_config
     def __init__(

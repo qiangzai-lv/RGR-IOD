@@ -1,4 +1,4 @@
-# Copyright 2025 Stability AI, The HuggingFace Team and The AlimamaCreative Team. All rights reserved.
+# Copyright 2024 Stability AI, The HuggingFace Team and The AlimamaCreative Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,16 +19,14 @@ import torch
 from transformers import (
     CLIPTextModelWithProjection,
     CLIPTokenizer,
-    SiglipImageProcessor,
-    SiglipModel,
     T5EncoderModel,
     T5TokenizerFast,
 )
 
 from ...image_processor import PipelineImageInput, VaeImageProcessor
-from ...loaders import FromSingleFileMixin, SD3IPAdapterMixin, SD3LoraLoaderMixin
+from ...loaders import FromSingleFileMixin, SD3LoraLoaderMixin
 from ...models.autoencoders import AutoencoderKL
-from ...models.controlnets.controlnet_sd3 import SD3ControlNetModel, SD3MultiControlNetModel
+from ...models.controlnet_sd3 import SD3ControlNetModel, SD3MultiControlNetModel
 from ...models.transformers import SD3Transformer2DModel
 from ...schedulers import FlowMatchEulerDiscreteScheduler
 from ...utils import (
@@ -110,7 +108,7 @@ def retrieve_timesteps(
     sigmas: Optional[List[float]] = None,
     **kwargs,
 ):
-    r"""
+    """
     Calls the scheduler's `set_timesteps` method and retrieves timesteps from the scheduler after the call. Handles
     custom timesteps. Any kwargs will be supplied to `scheduler.set_timesteps`.
 
@@ -161,9 +159,7 @@ def retrieve_timesteps(
     return timesteps, num_inference_steps
 
 
-class StableDiffusion3ControlNetInpaintingPipeline(
-    DiffusionPipeline, SD3LoraLoaderMixin, FromSingleFileMixin, SD3IPAdapterMixin
-):
+class StableDiffusion3ControlNetInpaintingPipeline(DiffusionPipeline, SD3LoraLoaderMixin, FromSingleFileMixin):
     r"""
     Args:
         transformer ([`SD3Transformer2DModel`]):
@@ -196,17 +192,13 @@ class StableDiffusion3ControlNetInpaintingPipeline(
             Tokenizer of class
             [T5Tokenizer](https://huggingface.co/docs/transformers/model_doc/t5#transformers.T5Tokenizer).
         controlnet ([`SD3ControlNetModel`] or `List[SD3ControlNetModel]` or [`SD3MultiControlNetModel`]):
-            Provides additional conditioning to the `transformer` during the denoising process. If you set multiple
+            Provides additional conditioning to the `unet` during the denoising process. If you set multiple
             ControlNets as a list, the outputs from each ControlNet are added together to create one combined
             additional conditioning.
-        image_encoder (`PreTrainedModel`, *optional*):
-            Pre-trained Vision Model for IP Adapter.
-        feature_extractor (`BaseImageProcessor`, *optional*):
-            Image processor for IP Adapter.
     """
 
-    model_cpu_offload_seq = "text_encoder->text_encoder_2->text_encoder_3->image_encoder->transformer->vae"
-    _optional_components = ["image_encoder", "feature_extractor"]
+    model_cpu_offload_seq = "text_encoder->text_encoder_2->text_encoder_3->transformer->vae"
+    _optional_components = []
     _callback_tensor_inputs = ["latents", "prompt_embeds", "negative_prompt_embeds", "negative_pooled_prompt_embeds"]
 
     def __init__(
@@ -223,8 +215,6 @@ class StableDiffusion3ControlNetInpaintingPipeline(
         controlnet: Union[
             SD3ControlNetModel, List[SD3ControlNetModel], Tuple[SD3ControlNetModel], SD3MultiControlNetModel
         ],
-        image_encoder: SiglipModel = None,
-        feature_extractor: Optional[SiglipImageProcessor] = None,
     ):
         super().__init__()
 
@@ -239,10 +229,10 @@ class StableDiffusion3ControlNetInpaintingPipeline(
             transformer=transformer,
             scheduler=scheduler,
             controlnet=controlnet,
-            image_encoder=image_encoder,
-            feature_extractor=feature_extractor,
         )
-        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1) if getattr(self, "vae", None) else 8
+        self.vae_scale_factor = (
+            2 ** (len(self.vae.config.block_out_channels) - 1) if hasattr(self, "vae") and self.vae is not None else 8
+        )
         self.image_processor = VaeImageProcessor(
             vae_scale_factor=self.vae_scale_factor, do_resize=True, do_convert_rgb=True, do_normalize=True
         )
@@ -260,9 +250,6 @@ class StableDiffusion3ControlNetInpaintingPipeline(
             self.transformer.config.sample_size
             if hasattr(self, "transformer") and self.transformer is not None
             else 128
-        )
-        self.patch_size = (
-            self.transformer.config.patch_size if hasattr(self, "transformer") and self.transformer is not None else 2
         )
 
     # Copied from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3.StableDiffusion3Pipeline._get_t5_prompt_embeds
@@ -422,9 +409,9 @@ class StableDiffusion3ControlNetInpaintingPipeline(
             negative_prompt_2 (`str` or `List[str]`, *optional*):
                 The prompt or prompts not to guide the image generation to be sent to `tokenizer_2` and
                 `text_encoder_2`. If not defined, `negative_prompt` is used in all the text-encoders.
-            negative_prompt_3 (`str` or `List[str]`, *optional*):
+            negative_prompt_2 (`str` or `List[str]`, *optional*):
                 The prompt or prompts not to guide the image generation to be sent to `tokenizer_3` and
-                `text_encoder_3`. If not defined, `negative_prompt` is used in all the text-encoders.
+                `text_encoder_3`. If not defined, `negative_prompt` is used in both text-encoders
             prompt_embeds (`torch.FloatTensor`, *optional*):
                 Pre-generated text embeddings. Can be used to easily tweak text inputs, *e.g.* prompt weighting. If not
                 provided, text embeddings will be generated from `prompt` input argument.
@@ -590,14 +577,8 @@ class StableDiffusion3ControlNetInpaintingPipeline(
         callback_on_step_end_tensor_inputs=None,
         max_sequence_length=None,
     ):
-        if (
-            height % (self.vae_scale_factor * self.patch_size) != 0
-            or width % (self.vae_scale_factor * self.patch_size) != 0
-        ):
-            raise ValueError(
-                f"`height` and `width` have to be divisible by {self.vae_scale_factor * self.patch_size} but are {height} and {width}."
-                f"You can use height {height - height % (self.vae_scale_factor * self.patch_size)} and width {width - width % (self.vae_scale_factor * self.patch_size)}."
-            )
+        if height % 8 != 0 or width % 8 != 0:
+            raise ValueError(f"`height` and `width` have to be divisible by 8 but are {height} and {width}.")
 
         if callback_on_step_end_tensor_inputs is not None and not all(
             k in self._callback_tensor_inputs for k in callback_on_step_end_tensor_inputs
@@ -769,7 +750,7 @@ class StableDiffusion3ControlNetInpaintingPipeline(
         return self._clip_skip
 
     # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
-    # of the Imagen paper: https://huggingface.co/papers/2205.11487 . `guidance_scale = 1`
+    # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
     # corresponds to doing no classifier free guidance.
     @property
     def do_classifier_free_guidance(self):
@@ -787,84 +768,6 @@ class StableDiffusion3ControlNetInpaintingPipeline(
     def interrupt(self):
         return self._interrupt
 
-    # Copied from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3.StableDiffusion3Pipeline.encode_image
-    def encode_image(self, image: PipelineImageInput, device: torch.device) -> torch.Tensor:
-        """Encodes the given image into a feature representation using a pre-trained image encoder.
-
-        Args:
-            image (`PipelineImageInput`):
-                Input image to be encoded.
-            device: (`torch.device`):
-                Torch device.
-
-        Returns:
-            `torch.Tensor`: The encoded image feature representation.
-        """
-        if not isinstance(image, torch.Tensor):
-            image = self.feature_extractor(image, return_tensors="pt").pixel_values
-
-        image = image.to(device=device, dtype=self.dtype)
-
-        return self.image_encoder(image, output_hidden_states=True).hidden_states[-2]
-
-    # Copied from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3.StableDiffusion3Pipeline.prepare_ip_adapter_image_embeds
-    def prepare_ip_adapter_image_embeds(
-        self,
-        ip_adapter_image: Optional[PipelineImageInput] = None,
-        ip_adapter_image_embeds: Optional[torch.Tensor] = None,
-        device: Optional[torch.device] = None,
-        num_images_per_prompt: int = 1,
-        do_classifier_free_guidance: bool = True,
-    ) -> torch.Tensor:
-        """Prepares image embeddings for use in the IP-Adapter.
-
-        Either `ip_adapter_image` or `ip_adapter_image_embeds` must be passed.
-
-        Args:
-            ip_adapter_image (`PipelineImageInput`, *optional*):
-                The input image to extract features from for IP-Adapter.
-            ip_adapter_image_embeds (`torch.Tensor`, *optional*):
-                Precomputed image embeddings.
-            device: (`torch.device`, *optional*):
-                Torch device.
-            num_images_per_prompt (`int`, defaults to 1):
-                Number of images that should be generated per prompt.
-            do_classifier_free_guidance (`bool`, defaults to True):
-                Whether to use classifier free guidance or not.
-        """
-        device = device or self._execution_device
-
-        if ip_adapter_image_embeds is not None:
-            if do_classifier_free_guidance:
-                single_negative_image_embeds, single_image_embeds = ip_adapter_image_embeds.chunk(2)
-            else:
-                single_image_embeds = ip_adapter_image_embeds
-        elif ip_adapter_image is not None:
-            single_image_embeds = self.encode_image(ip_adapter_image, device)
-            if do_classifier_free_guidance:
-                single_negative_image_embeds = torch.zeros_like(single_image_embeds)
-        else:
-            raise ValueError("Neither `ip_adapter_image_embeds` or `ip_adapter_image_embeds` were provided.")
-
-        image_embeds = torch.cat([single_image_embeds] * num_images_per_prompt, dim=0)
-
-        if do_classifier_free_guidance:
-            negative_image_embeds = torch.cat([single_negative_image_embeds] * num_images_per_prompt, dim=0)
-            image_embeds = torch.cat([negative_image_embeds, image_embeds], dim=0)
-
-        return image_embeds.to(device=device)
-
-    # Copied from diffusers.pipelines.stable_diffusion_3.pipeline_stable_diffusion_3.StableDiffusion3Pipeline.enable_sequential_cpu_offload
-    def enable_sequential_cpu_offload(self, *args, **kwargs):
-        if self.image_encoder is not None and "image_encoder" not in self._exclude_from_cpu_offload:
-            logger.warning(
-                "`pipe.enable_sequential_cpu_offload()` might fail for `image_encoder` if it uses "
-                "`torch.nn.MultiheadAttention`. You can exclude `image_encoder` from CPU offloading by calling "
-                "`pipe._exclude_from_cpu_offload.append('image_encoder')` before `pipe.enable_sequential_cpu_offload()`."
-            )
-
-        super().enable_sequential_cpu_offload(*args, **kwargs)
-
     @torch.no_grad()
     @replace_example_docstring(EXAMPLE_DOC_STRING)
     def __call__(
@@ -875,7 +778,7 @@ class StableDiffusion3ControlNetInpaintingPipeline(
         height: Optional[int] = None,
         width: Optional[int] = None,
         num_inference_steps: int = 28,
-        sigmas: Optional[List[float]] = None,
+        timesteps: List[int] = None,
         guidance_scale: float = 7.0,
         control_guidance_start: Union[float, List[float]] = 0.0,
         control_guidance_end: Union[float, List[float]] = 1.0,
@@ -893,8 +796,6 @@ class StableDiffusion3ControlNetInpaintingPipeline(
         negative_prompt_embeds: Optional[torch.FloatTensor] = None,
         pooled_prompt_embeds: Optional[torch.FloatTensor] = None,
         negative_pooled_prompt_embeds: Optional[torch.FloatTensor] = None,
-        ip_adapter_image: Optional[PipelineImageInput] = None,
-        ip_adapter_image_embeds: Optional[torch.Tensor] = None,
         output_type: Optional[str] = "pil",
         return_dict: bool = True,
         joint_attention_kwargs: Optional[Dict[str, Any]] = None,
@@ -923,16 +824,16 @@ class StableDiffusion3ControlNetInpaintingPipeline(
             num_inference_steps (`int`, *optional*, defaults to 50):
                 The number of denoising steps. More denoising steps usually lead to a higher quality image at the
                 expense of slower inference.
-            sigmas (`List[float]`, *optional*):
-                Custom sigmas to use for the denoising process with schedulers which support a `sigmas` argument in
-                their `set_timesteps` method. If not defined, the default behavior when `num_inference_steps` is passed
-                will be used.
+            timesteps (`List[int]`, *optional*):
+                Custom timesteps to use for the denoising process with schedulers which support a `timesteps` argument
+                in their `set_timesteps` method. If not defined, the default behavior when `num_inference_steps` is
+                passed will be used. Must be in descending order.
             guidance_scale (`float`, *optional*, defaults to 5.0):
-                Guidance scale as defined in [Classifier-Free Diffusion
-                Guidance](https://huggingface.co/papers/2207.12598). `guidance_scale` is defined as `w` of equation 2.
-                of [Imagen Paper](https://huggingface.co/papers/2205.11487). Guidance scale is enabled by setting
-                `guidance_scale > 1`. Higher guidance scale encourages to generate images that are closely linked to
-                the text `prompt`, usually at the expense of lower image quality.
+                Guidance scale as defined in [Classifier-Free Diffusion Guidance](https://arxiv.org/abs/2207.12598).
+                `guidance_scale` is defined as `w` of equation 2. of [Imagen
+                Paper](https://arxiv.org/pdf/2205.11487.pdf). Guidance scale is enabled by setting `guidance_scale >
+                1`. Higher guidance scale encourages to generate images that are closely linked to the text `prompt`,
+                usually at the expense of lower image quality.
             control_guidance_start (`float` or `List[float]`, *optional*, defaults to 0.0):
                 The percentage of total steps at which the ControlNet starts applying.
             control_guidance_end (`float` or `List[float]`, *optional*, defaults to 1.0):
@@ -988,12 +889,6 @@ class StableDiffusion3ControlNetInpaintingPipeline(
                 Pre-generated negative pooled text embeddings. Can be used to easily tweak text inputs, *e.g.* prompt
                 weighting. If not provided, pooled negative_prompt_embeds will be generated from `negative_prompt`
                 input argument.
-            ip_adapter_image (`PipelineImageInput`, *optional*):
-                Optional image input to work with IP Adapters.
-            ip_adapter_image_embeds (`torch.Tensor`, *optional*):
-                Pre-generated image embeddings for IP-Adapter. Should be a tensor of shape `(batch_size, num_images,
-                emb_dim)`. It should contain the negative image embedding if `do_classifier_free_guidance` is set to
-                `True`. If not provided, embeddings are computed from the `ip_adapter_image` input argument.
             output_type (`str`, *optional*, defaults to `"pil"`):
                 The output format of the generate image. Choose between
                 [PIL](https://pillow.readthedocs.io/en/stable/): `PIL.Image.Image` or `np.array`.
@@ -1129,7 +1024,7 @@ class StableDiffusion3ControlNetInpaintingPipeline(
             controlnet_pooled_projections = controlnet_pooled_projections or pooled_prompt_embeds
 
         # 4. Prepare timesteps
-        timesteps, num_inference_steps = retrieve_timesteps(self.scheduler, num_inference_steps, device, sigmas=sigmas)
+        timesteps, num_inference_steps = retrieve_timesteps(self.scheduler, num_inference_steps, device, timesteps)
         num_warmup_steps = max(len(timesteps) - num_inference_steps * self.scheduler.order, 0)
         self._num_timesteps = len(timesteps)
 
@@ -1155,22 +1050,7 @@ class StableDiffusion3ControlNetInpaintingPipeline(
             ]
             controlnet_keep.append(keeps[0] if isinstance(self.controlnet, SD3ControlNetModel) else keeps)
 
-        # 7. Prepare image embeddings
-        if (ip_adapter_image is not None and self.is_ip_adapter_active) or ip_adapter_image_embeds is not None:
-            ip_adapter_image_embeds = self.prepare_ip_adapter_image_embeds(
-                ip_adapter_image,
-                ip_adapter_image_embeds,
-                device,
-                batch_size * num_images_per_prompt,
-                self.do_classifier_free_guidance,
-            )
-
-            if self.joint_attention_kwargs is None:
-                self._joint_attention_kwargs = {"ip_adapter_image_embeds": ip_adapter_image_embeds}
-            else:
-                self._joint_attention_kwargs.update(ip_adapter_image_embeds=ip_adapter_image_embeds)
-
-        # 8. Denoising loop
+        # 7. Denoising loop
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
                 if self.interrupt:

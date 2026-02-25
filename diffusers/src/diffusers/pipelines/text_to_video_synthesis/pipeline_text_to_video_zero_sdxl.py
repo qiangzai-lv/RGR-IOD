@@ -35,22 +35,12 @@ from ...utils import (
     unscale_lora_layers,
 )
 from ...utils.torch_utils import randn_tensor
-from ..pipeline_utils import DeprecatedPipelineMixin, DiffusionPipeline, StableDiffusionMixin
+from ..pipeline_utils import DiffusionPipeline, StableDiffusionMixin
 
 
 if is_invisible_watermark_available():
     from ..stable_diffusion_xl.watermark import StableDiffusionXLWatermarker
 
-
-from ...utils import is_torch_xla_available
-
-
-if is_torch_xla_available():
-    import torch_xla.core.xla_model as xm
-
-    XLA_AVAILABLE = True
-else:
-    XLA_AVAILABLE = False
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -320,21 +310,9 @@ def create_motion_field_and_warp_latents(motion_field_strength_x, motion_field_s
 
 # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.rescale_noise_cfg
 def rescale_noise_cfg(noise_cfg, noise_pred_text, guidance_rescale=0.0):
-    r"""
-    Rescales `noise_cfg` tensor based on `guidance_rescale` to improve image quality and fix overexposure. Based on
-    Section 3.4 from [Common Diffusion Noise Schedules and Sample Steps are
-    Flawed](https://huggingface.co/papers/2305.08891).
-
-    Args:
-        noise_cfg (`torch.Tensor`):
-            The predicted noise tensor for the guided diffusion process.
-        noise_pred_text (`torch.Tensor`):
-            The predicted noise tensor for the text-guided diffusion process.
-        guidance_rescale (`float`, *optional*, defaults to 0.0):
-            A rescale factor applied to the noise predictions.
-
-    Returns:
-        noise_cfg (`torch.Tensor`): The rescaled noise prediction tensor.
+    """
+    Rescale `noise_cfg` according to `guidance_rescale`. Based on findings of [Common Diffusion Noise Schedules and
+    Sample Steps are Flawed](https://arxiv.org/pdf/2305.08891.pdf). See Section 3.4
     """
     std_text = noise_pred_text.std(dim=list(range(1, noise_pred_text.ndim)), keepdim=True)
     std_cfg = noise_cfg.std(dim=list(range(1, noise_cfg.ndim)), keepdim=True)
@@ -346,13 +324,11 @@ def rescale_noise_cfg(noise_cfg, noise_pred_text, guidance_rescale=0.0):
 
 
 class TextToVideoZeroSDXLPipeline(
-    DeprecatedPipelineMixin,
     DiffusionPipeline,
     StableDiffusionMixin,
     StableDiffusionXLLoraLoaderMixin,
     TextualInversionLoaderMixin,
 ):
-    _last_supported_version = "0.33.1"
     r"""
     Pipeline for zero-shot text-to-video generation using Stable Diffusion XL.
 
@@ -421,14 +397,10 @@ class TextToVideoZeroSDXLPipeline(
             feature_extractor=feature_extractor,
         )
         self.register_to_config(force_zeros_for_empty_prompt=force_zeros_for_empty_prompt)
-        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1) if getattr(self, "vae", None) else 8
+        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
 
-        self.default_sample_size = (
-            self.unet.config.sample_size
-            if hasattr(self, "unet") and self.unet is not None and hasattr(self.unet.config, "sample_size")
-            else 128
-        )
+        self.default_sample_size = self.unet.config.sample_size
 
         add_watermarker = add_watermarker if add_watermarker is not None else is_invisible_watermark_available()
 
@@ -441,7 +413,7 @@ class TextToVideoZeroSDXLPipeline(
     def prepare_extra_step_kwargs(self, generator, eta):
         # prepare extra kwargs for the scheduler step, since not all schedulers have the same signature
         # eta (η) is only used with the DDIMScheduler, it will be ignored for other schedulers.
-        # eta corresponds to η in DDIM paper: https://huggingface.co/papers/2010.02502
+        # eta corresponds to η in DDIM paper: https://arxiv.org/abs/2010.02502
         # and should be between [0, 1]
 
         accepts_eta = "eta" in set(inspect.signature(self.scheduler.step).parameters.keys())
@@ -721,9 +693,7 @@ class TextToVideoZeroSDXLPipeline(
                 prompt_embeds = text_encoder(text_input_ids.to(device), output_hidden_states=True)
 
                 # We are only ALWAYS interested in the pooled output of the final text encoder
-                if pooled_prompt_embeds is None and prompt_embeds[0].ndim == 2:
-                    pooled_prompt_embeds = prompt_embeds[0]
-
+                pooled_prompt_embeds = prompt_embeds[0]
                 if clip_skip is None:
                     prompt_embeds = prompt_embeds.hidden_states[-2]
                 else:
@@ -782,10 +752,8 @@ class TextToVideoZeroSDXLPipeline(
                     uncond_input.input_ids.to(device),
                     output_hidden_states=True,
                 )
-
                 # We are only ALWAYS interested in the pooled output of the final text encoder
-                if negative_pooled_prompt_embeds is None and negative_prompt_embeds[0].ndim == 2:
-                    negative_pooled_prompt_embeds = negative_prompt_embeds[0]
+                negative_pooled_prompt_embeds = negative_prompt_embeds[0]
                 negative_prompt_embeds = negative_prompt_embeds.hidden_states[-2]
 
                 negative_prompt_embeds_list.append(negative_prompt_embeds)
@@ -931,7 +899,7 @@ class TextToVideoZeroSDXLPipeline(
                     noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
                 if do_classifier_free_guidance and guidance_rescale > 0.0:
-                    # Based on 3.4. in https://huggingface.co/papers/2305.08891
+                    # Based on 3.4. in https://arxiv.org/pdf/2305.08891.pdf
                     noise_pred = rescale_noise_cfg(noise_pred, noise_pred_text, guidance_rescale=guidance_rescale)
 
                 # compute the previous noisy sample x_t -> x_t-1
@@ -942,10 +910,6 @@ class TextToVideoZeroSDXLPipeline(
                     progress_bar.update()
                     if callback is not None and i % callback_steps == 0:
                         callback(i, t, latents)
-
-                if XLA_AVAILABLE:
-                    xm.mark_step()
-
         return latents.clone().detach()
 
     @torch.no_grad()
@@ -1011,11 +975,11 @@ class TextToVideoZeroSDXLPipeline(
                 "Mixture of Denoisers" multi-pipeline setup, as elaborated in [**Refining the Image
                 Output**](https://huggingface.co/docs/diffusers/api/pipelines/stable_diffusion/stable_diffusion_xl#refining-the-image-output)
             guidance_scale (`float`, *optional*, defaults to 7.5):
-                Guidance scale as defined in [Classifier-Free Diffusion
-                Guidance](https://huggingface.co/papers/2207.12598). `guidance_scale` is defined as `w` of equation 2.
-                of [Imagen Paper](https://huggingface.co/papers/2205.11487). Guidance scale is enabled by setting
-                `guidance_scale > 1`. Higher guidance scale encourages to generate images that are closely linked to
-                the text `prompt`, usually at the expense of lower image quality.
+                Guidance scale as defined in [Classifier-Free Diffusion Guidance](https://arxiv.org/abs/2207.12598).
+                `guidance_scale` is defined as `w` of equation 2. of [Imagen
+                Paper](https://arxiv.org/pdf/2205.11487.pdf). Guidance scale is enabled by setting `guidance_scale >
+                1`. Higher guidance scale encourages to generate images that are closely linked to the text `prompt`,
+                usually at the expense of lower image quality.
             negative_prompt (`str` or `List[str]`, *optional*):
                 The prompt or prompts not to guide the image generation. If not defined, one has to pass
                 `negative_prompt_embeds` instead. Ignored when not using guidance (i.e., ignored if `guidance_scale` is
@@ -1026,8 +990,8 @@ class TextToVideoZeroSDXLPipeline(
             num_videos_per_prompt (`int`, *optional*, defaults to 1):
                 The number of videos to generate per prompt.
             eta (`float`, *optional*, defaults to 0.0):
-                Corresponds to parameter eta (η) in the DDIM paper: https://huggingface.co/papers/2010.02502. Only
-                applies to [`schedulers.DDIMScheduler`], will be ignored for others.
+                Corresponds to parameter eta (η) in the DDIM paper: https://arxiv.org/abs/2010.02502. Only applies to
+                [`schedulers.DDIMScheduler`], will be ignored for others.
             generator (`torch.Generator` or `List[torch.Generator]`, *optional*):
                 One or a list of [torch generator(s)](https://pytorch.org/docs/stable/generated/torch.Generator.html)
                 to make generation deterministic.
@@ -1053,11 +1017,11 @@ class TextToVideoZeroSDXLPipeline(
                 generation. Can be used to tweak the same generation with different prompts. If not provided, a latents
                 tensor will ge generated by sampling using the supplied random `generator`.
             motion_field_strength_x (`float`, *optional*, defaults to 12):
-                Strength of motion in generated video along x-axis. See the
-                [paper](https://huggingface.co/papers/2303.13439), Sect. 3.3.1.
+                Strength of motion in generated video along x-axis. See the [paper](https://arxiv.org/abs/2303.13439),
+                Sect. 3.3.1.
             motion_field_strength_y (`float`, *optional*, defaults to 12):
-                Strength of motion in generated video along y-axis. See the
-                [paper](https://huggingface.co/papers/2303.13439), Sect. 3.3.1.
+                Strength of motion in generated video along y-axis. See the [paper](https://arxiv.org/abs/2303.13439),
+                Sect. 3.3.1.
             output_type (`str`, *optional*, defaults to `"pil"`):
                 The output format of the generate image. Choose between
                 [PIL](https://pillow.readthedocs.io/en/stable/): `PIL.Image.Image` or `np.array`.
@@ -1076,10 +1040,9 @@ class TextToVideoZeroSDXLPipeline(
                 [diffusers.cross_attention](https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/cross_attention.py).
             guidance_rescale (`float`, *optional*, defaults to 0.7):
                 Guidance rescale factor proposed by [Common Diffusion Noise Schedules and Sample Steps are
-                Flawed](https://huggingface.co/papers/2305.08891) `guidance_scale` is defined as `φ` in equation 16. of
-                [Common Diffusion Noise Schedules and Sample Steps are
-                Flawed](https://huggingface.co/papers/2305.08891). Guidance rescale factor should fix overexposure when
-                using zero terminal SNR.
+                Flawed](https://arxiv.org/pdf/2305.08891.pdf) `guidance_scale` is defined as `φ` in equation 16. of
+                [Common Diffusion Noise Schedules and Sample Steps are Flawed](https://arxiv.org/pdf/2305.08891.pdf).
+                Guidance rescale factor should fix overexposure when using zero terminal SNR.
             original_size (`Tuple[int]`, *optional*, defaults to (1024, 1024)):
                 If `original_size` is not the same as `target_size` the image will appear to be down- or upsampled.
                 `original_size` defaults to `(width, height)` if not specified. Part of SDXL's micro-conditioning as
@@ -1096,10 +1059,10 @@ class TextToVideoZeroSDXLPipeline(
                 section 2.2 of [https://huggingface.co/papers/2307.01952](https://huggingface.co/papers/2307.01952).
             t0 (`int`, *optional*, defaults to 44):
                 Timestep t0. Should be in the range [0, num_inference_steps - 1]. See the
-                [paper](https://huggingface.co/papers/2303.13439), Sect. 3.3.1.
+                [paper](https://arxiv.org/abs/2303.13439), Sect. 3.3.1.
             t1 (`int`, *optional*, defaults to 47):
                 Timestep t0. Should be in the range [t0 + 1, num_inference_steps - 1]. See the
-                [paper](https://huggingface.co/papers/2303.13439), Sect. 3.3.1.
+                [paper](https://arxiv.org/abs/2303.13439), Sect. 3.3.1.
 
         Returns:
             [`~pipelines.text_to_video_synthesis.pipeline_text_to_video_zero.TextToVideoSDXLPipelineOutput`] or
@@ -1156,7 +1119,7 @@ class TextToVideoZeroSDXLPipeline(
         )
         device = self._execution_device
         # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
-        # of the Imagen paper: https://huggingface.co/papers/2205.11487 . `guidance_scale = 1`
+        # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
         # corresponds to doing no classifier free guidance.
         do_classifier_free_guidance = guidance_scale > 1.0
 

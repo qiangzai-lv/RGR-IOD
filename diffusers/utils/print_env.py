@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 # coding=utf-8
-# Copyright 2025 The HuggingFace Inc. team.
+# Copyright 2024 The HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -28,40 +28,15 @@ print("Python version:", sys.version)
 
 print("OS platform:", platform.platform())
 print("OS architecture:", platform.machine())
-try:
-    import psutil
-
-    vm = psutil.virtual_memory()
-    total_gb = vm.total / (1024**3)
-    available_gb = vm.available / (1024**3)
-    print(f"Total RAM:     {total_gb:.2f} GB")
-    print(f"Available RAM: {available_gb:.2f} GB")
-except ImportError:
-    pass
 
 try:
     import torch
 
     print("Torch version:", torch.__version__)
     print("Cuda available:", torch.cuda.is_available())
-    if torch.cuda.is_available():
-        print("Cuda version:", torch.version.cuda)
-        print("CuDNN version:", torch.backends.cudnn.version())
-        print("Number of GPUs available:", torch.cuda.device_count())
-        device_properties = torch.cuda.get_device_properties(0)
-        total_memory = device_properties.total_memory / (1024**3)
-        print(f"CUDA memory: {total_memory} GB")
-
-    print("XPU available:", hasattr(torch, "xpu") and torch.xpu.is_available())
-    if hasattr(torch, "xpu") and torch.xpu.is_available():
-        print("XPU model:", torch.xpu.get_device_properties(0).name)
-        print("XPU compiler version:", torch.version.xpu)
-        print("Number of XPUs available:", torch.xpu.device_count())
-        device_properties = torch.xpu.get_device_properties(0)
-        total_memory = device_properties.total_memory / (1024**3)
-        print(f"XPU memory: {total_memory} GB")
-
-
+    print("Cuda version:", torch.version.cuda)
+    print("CuDNN version:", torch.backends.cudnn.version())
+    print("Number of GPUs available:", torch.cuda.device_count())
 except ImportError:
     print("Torch version:", None)
 

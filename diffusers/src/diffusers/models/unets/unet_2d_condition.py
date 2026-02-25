@@ -1,4 +1,4 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
+# Copyright 2024 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -165,14 +165,12 @@ class UNet2DConditionModel(
     """
 
     _supports_gradient_checkpointing = True
-    _no_split_modules = ["BasicTransformerBlock", "ResnetBlock2D", "CrossAttnUpBlock2D", "UpBlock2D"]
-    _skip_layerwise_casting_patterns = ["norm"]
-    _repeated_blocks = ["BasicTransformerBlock"]
+    _no_split_modules = ["BasicTransformerBlock", "ResnetBlock2D", "CrossAttnUpBlock2D"]
 
     @register_to_config
     def __init__(
         self,
-        sample_size: Optional[Union[int, Tuple[int, int]]] = None,
+        sample_size: Optional[int] = None,
         in_channels: int = 4,
         out_channels: int = 4,
         center_input_sample: bool = False,
@@ -835,8 +833,12 @@ class UNet2DConditionModel(
         for module in self.children():
             fn_recursive_set_attention_slice(module, reversed_slice_size)
 
+    def _set_gradient_checkpointing(self, module, value=False):
+        if hasattr(module, "gradient_checkpointing"):
+            module.gradient_checkpointing = value
+
     def enable_freeu(self, s1: float, s2: float, b1: float, b2: float):
-        r"""Enables the FreeU mechanism from https://huggingface.co/papers/2309.11497.
+        r"""Enables the FreeU mechanism from https://arxiv.org/abs/2309.11497.
 
         The suffixes after the scaling factors represent the stage blocks where they are being applied.
 
@@ -913,11 +915,10 @@ class UNet2DConditionModel(
             # TODO: this requires sync between CPU and GPU. So try to pass timesteps as tensors if you can
             # This would be a good case for the `match` statement (Python 3.10+)
             is_mps = sample.device.type == "mps"
-            is_npu = sample.device.type == "npu"
             if isinstance(timestep, float):
-                dtype = torch.float32 if (is_mps or is_npu) else torch.float64
+                dtype = torch.float32 if is_mps else torch.float64
             else:
-                dtype = torch.int32 if (is_mps or is_npu) else torch.int64
+                dtype = torch.int32 if is_mps else torch.int64
             timesteps = torch.tensor([timesteps], dtype=dtype, device=sample.device)
         elif len(timesteps.shape) == 0:
             timesteps = timesteps[None].to(sample.device)

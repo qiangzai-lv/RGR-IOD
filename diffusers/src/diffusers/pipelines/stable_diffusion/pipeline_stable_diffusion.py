@@ -1,4 +1,4 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
+# Copyright 2024 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -55,9 +55,7 @@ EXAMPLE_DOC_STRING = """
         >>> import torch
         >>> from diffusers import StableDiffusionPipeline
 
-        >>> pipe = StableDiffusionPipeline.from_pretrained(
-        ...     "stable-diffusion-v1-5/stable-diffusion-v1-5", torch_dtype=torch.float16
-        ... )
+        >>> pipe = StableDiffusionPipeline.from_pretrained("runwayml/stable-diffusion-v1-5", torch_dtype=torch.float16)
         >>> pipe = pipe.to("cuda")
 
         >>> prompt = "a photo of an astronaut riding a horse on mars"
@@ -67,21 +65,9 @@ EXAMPLE_DOC_STRING = """
 
 
 def rescale_noise_cfg(noise_cfg, noise_pred_text, guidance_rescale=0.0):
-    r"""
-    Rescales `noise_cfg` tensor based on `guidance_rescale` to improve image quality and fix overexposure. Based on
-    Section 3.4 from [Common Diffusion Noise Schedules and Sample Steps are
-    Flawed](https://huggingface.co/papers/2305.08891).
-
-    Args:
-        noise_cfg (`torch.Tensor`):
-            The predicted noise tensor for the guided diffusion process.
-        noise_pred_text (`torch.Tensor`):
-            The predicted noise tensor for the text-guided diffusion process.
-        guidance_rescale (`float`, *optional*, defaults to 0.0):
-            A rescale factor applied to the noise predictions.
-
-    Returns:
-        noise_cfg (`torch.Tensor`): The rescaled noise prediction tensor.
+    """
+    Rescale `noise_cfg` according to `guidance_rescale`. Based on findings of [Common Diffusion Noise Schedules and
+    Sample Steps are Flawed](https://arxiv.org/pdf/2305.08891.pdf). See Section 3.4
     """
     std_text = noise_pred_text.std(dim=list(range(1, noise_pred_text.ndim)), keepdim=True)
     std_cfg = noise_cfg.std(dim=list(range(1, noise_cfg.ndim)), keepdim=True)
@@ -100,7 +86,7 @@ def retrieve_timesteps(
     sigmas: Optional[List[float]] = None,
     **kwargs,
 ):
-    r"""
+    """
     Calls the scheduler's `set_timesteps` method and retrieves timesteps from the scheduler after the call. Handles
     custom timesteps. Any kwargs will be supplied to `scheduler.set_timesteps`.
 
@@ -159,7 +145,7 @@ class StableDiffusionPipeline(
     IPAdapterMixin,
     FromSingleFileMixin,
 ):
-    """
+    r"""
     Pipeline for text-to-image generation using Stable Diffusion.
 
     This model inherits from [`DiffusionPipeline`]. Check the superclass documentation for the generic methods
@@ -186,8 +172,8 @@ class StableDiffusionPipeline(
             [`DDIMScheduler`], [`LMSDiscreteScheduler`], or [`PNDMScheduler`].
         safety_checker ([`StableDiffusionSafetyChecker`]):
             Classification module that estimates whether generated images could be considered offensive or harmful.
-            Please refer to the [model card](https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5) for
-            more details about a model's potential harms.
+            Please refer to the [model card](https://huggingface.co/runwayml/stable-diffusion-v1-5) for more details
+            about a model's potential harms.
         feature_extractor ([`~transformers.CLIPImageProcessor`]):
             A `CLIPImageProcessor` to extract features from generated images; used as inputs to the `safety_checker`.
     """
@@ -211,7 +197,7 @@ class StableDiffusionPipeline(
     ):
         super().__init__()
 
-        if scheduler is not None and getattr(scheduler.config, "steps_offset", 1) != 1:
+        if hasattr(scheduler.config, "steps_offset") and scheduler.config.steps_offset != 1:
             deprecation_message = (
                 f"The configuration file of this scheduler: {scheduler} is outdated. `steps_offset`"
                 f" should be set to 1 instead of {scheduler.config.steps_offset}. Please make sure "
@@ -225,7 +211,7 @@ class StableDiffusionPipeline(
             new_config["steps_offset"] = 1
             scheduler._internal_dict = FrozenDict(new_config)
 
-        if scheduler is not None and getattr(scheduler.config, "clip_sample", False) is True:
+        if hasattr(scheduler.config, "clip_sample") and scheduler.config.clip_sample is True:
             deprecation_message = (
                 f"The configuration file of this scheduler: {scheduler} has not set the configuration `clip_sample`."
                 " `clip_sample` should be set to False in the configuration file. Please make sure to update the"
@@ -254,25 +240,17 @@ class StableDiffusionPipeline(
                 " checker. If you do not want to use the safety checker, you can pass `'safety_checker=None'` instead."
             )
 
-        is_unet_version_less_0_9_0 = (
-            unet is not None
-            and hasattr(unet.config, "_diffusers_version")
-            and version.parse(version.parse(unet.config._diffusers_version).base_version) < version.parse("0.9.0.dev0")
-        )
-        self._is_unet_config_sample_size_int = unet is not None and isinstance(unet.config.sample_size, int)
-        is_unet_sample_size_less_64 = (
-            unet is not None
-            and hasattr(unet.config, "sample_size")
-            and self._is_unet_config_sample_size_int
-            and unet.config.sample_size < 64
-        )
+        is_unet_version_less_0_9_0 = hasattr(unet.config, "_diffusers_version") and version.parse(
+            version.parse(unet.config._diffusers_version).base_version
+        ) < version.parse("0.9.0.dev0")
+        is_unet_sample_size_less_64 = hasattr(unet.config, "sample_size") and unet.config.sample_size < 64
         if is_unet_version_less_0_9_0 and is_unet_sample_size_less_64:
             deprecation_message = (
                 "The configuration file of the unet has set the default `sample_size` to smaller than"
                 " 64 which seems highly unlikely. If your checkpoint is a fine-tuned version of any of the"
                 " following: \n- CompVis/stable-diffusion-v1-4 \n- CompVis/stable-diffusion-v1-3 \n-"
-                " CompVis/stable-diffusion-v1-2 \n- CompVis/stable-diffusion-v1-1 \n- stable-diffusion-v1-5/stable-diffusion-v1-5"
-                " \n- stable-diffusion-v1-5/stable-diffusion-inpainting \n you should change 'sample_size' to 64 in the"
+                " CompVis/stable-diffusion-v1-2 \n- CompVis/stable-diffusion-v1-1 \n- runwayml/stable-diffusion-v1-5"
+                " \n- runwayml/stable-diffusion-inpainting \n you should change 'sample_size' to 64 in the"
                 " configuration file. Please make sure to update the config accordingly as leaving `sample_size=32`"
                 " in the config might lead to incorrect results in future versions. If you have downloaded this"
                 " checkpoint from the Hugging Face Hub, it would be very nice if you could open a Pull request for"
@@ -293,7 +271,7 @@ class StableDiffusionPipeline(
             feature_extractor=feature_extractor,
             image_encoder=image_encoder,
         )
-        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1) if getattr(self, "vae", None) else 8
+        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
         self.register_to_config(requires_safety_checker=requires_safety_checker)
 
@@ -608,7 +586,7 @@ class StableDiffusionPipeline(
     def prepare_extra_step_kwargs(self, generator, eta):
         # prepare extra kwargs for the scheduler step, since not all schedulers have the same signature
         # eta (η) is only used with the DDIMScheduler, it will be ignored for other schedulers.
-        # eta corresponds to η in DDIM paper: https://huggingface.co/papers/2010.02502
+        # eta corresponds to η in DDIM paper: https://arxiv.org/abs/2010.02502
         # and should be between [0, 1]
 
         accepts_eta = "eta" in set(inspect.signature(self.scheduler.step).parameters.keys())
@@ -757,7 +735,7 @@ class StableDiffusionPipeline(
         return self._clip_skip
 
     # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
-    # of the Imagen paper: https://huggingface.co/papers/2205.11487 . `guidance_scale = 1`
+    # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
     # corresponds to doing no classifier free guidance.
     @property
     def do_classifier_free_guidance(self):
@@ -836,8 +814,8 @@ class StableDiffusionPipeline(
             num_images_per_prompt (`int`, *optional*, defaults to 1):
                 The number of images to generate per prompt.
             eta (`float`, *optional*, defaults to 0.0):
-                Corresponds to parameter eta (η) from the [DDIM](https://huggingface.co/papers/2010.02502) paper. Only
-                applies to the [`~schedulers.DDIMScheduler`], and is ignored in other schedulers.
+                Corresponds to parameter eta (η) from the [DDIM](https://arxiv.org/abs/2010.02502) paper. Only applies
+                to the [`~schedulers.DDIMScheduler`], and is ignored in other schedulers.
             generator (`torch.Generator` or `List[torch.Generator]`, *optional*):
                 A [`torch.Generator`](https://pytorch.org/docs/stable/generated/torch.Generator.html) to make
                 generation deterministic.
@@ -867,7 +845,7 @@ class StableDiffusionPipeline(
                 [`self.processor`](https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/attention_processor.py).
             guidance_rescale (`float`, *optional*, defaults to 0.0):
                 Guidance rescale factor from [Common Diffusion Noise Schedules and Sample Steps are
-                Flawed](https://huggingface.co/papers/2305.08891). Guidance rescale factor should fix overexposure when
+                Flawed](https://arxiv.org/pdf/2305.08891.pdf). Guidance rescale factor should fix overexposure when
                 using zero terminal SNR.
             clip_skip (`int`, *optional*):
                 Number of layers to be skipped from CLIP while computing the prompt embeddings. A value of 1 means that
@@ -912,18 +890,8 @@ class StableDiffusionPipeline(
             callback_on_step_end_tensor_inputs = callback_on_step_end.tensor_inputs
 
         # 0. Default height and width to unet
-        if not height or not width:
-            height = (
-                self.unet.config.sample_size
-                if self._is_unet_config_sample_size_int
-                else self.unet.config.sample_size[0]
-            )
-            width = (
-                self.unet.config.sample_size
-                if self._is_unet_config_sample_size_int
-                else self.unet.config.sample_size[1]
-            )
-            height, width = height * self.vae_scale_factor, width * self.vae_scale_factor
+        height = height or self.unet.config.sample_size * self.vae_scale_factor
+        width = width or self.unet.config.sample_size * self.vae_scale_factor
         # to deal with lora scaling and other possible forward hooks
 
         # 1. Check inputs. Raise error if not correct
@@ -1034,8 +1002,7 @@ class StableDiffusionPipeline(
 
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = torch.cat([latents] * 2) if self.do_classifier_free_guidance else latents
-                if hasattr(self.scheduler, "scale_model_input"):
-                    latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
+                latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
 
                 # predict the noise residual
                 noise_pred = self.unet(
@@ -1054,7 +1021,7 @@ class StableDiffusionPipeline(
                     noise_pred = noise_pred_uncond + self.guidance_scale * (noise_pred_text - noise_pred_uncond)
 
                 if self.do_classifier_free_guidance and self.guidance_rescale > 0.0:
-                    # Based on 3.4. in https://huggingface.co/papers/2305.08891
+                    # Based on 3.4. in https://arxiv.org/pdf/2305.08891.pdf
                     noise_pred = rescale_noise_cfg(noise_pred, noise_pred_text, guidance_rescale=self.guidance_rescale)
 
                 # compute the previous noisy sample x_t -> x_t-1
@@ -1093,6 +1060,7 @@ class StableDiffusionPipeline(
             do_denormalize = [True] * image.shape[0]
         else:
             do_denormalize = [not has_nsfw for has_nsfw in has_nsfw_concept]
+
         image = self.image_processor.postprocess(image, output_type=output_type, do_denormalize=do_denormalize)
 
         # Offload all models

@@ -1,4 +1,4 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
+# Copyright 2024 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -32,7 +32,6 @@ from ...utils import (
     PIL_INTERPOLATION,
     USE_PEFT_BACKEND,
     deprecate,
-    is_torch_xla_available,
     logging,
     replace_example_docstring,
     scale_lora_layers,
@@ -44,15 +43,7 @@ from . import StableDiffusionPipelineOutput
 from .safety_checker import StableDiffusionSafetyChecker
 
 
-if is_torch_xla_available():
-    import torch_xla.core.xla_model as xm
-
-    XLA_AVAILABLE = True
-else:
-    XLA_AVAILABLE = False
-
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
-
 
 EXAMPLE_DOC_STRING = """
     Examples:
@@ -65,7 +56,7 @@ EXAMPLE_DOC_STRING = """
         >>> from diffusers import StableDiffusionImg2ImgPipeline
 
         >>> device = "cuda"
-        >>> model_id_or_path = "stable-diffusion-v1-5/stable-diffusion-v1-5"
+        >>> model_id_or_path = "runwayml/stable-diffusion-v1-5"
         >>> pipe = StableDiffusionImg2ImgPipeline.from_pretrained(model_id_or_path, torch_dtype=torch.float16)
         >>> pipe = pipe.to(device)
 
@@ -128,7 +119,7 @@ def retrieve_timesteps(
     sigmas: Optional[List[float]] = None,
     **kwargs,
 ):
-    r"""
+    """
     Calls the scheduler's `set_timesteps` method and retrieves timesteps from the scheduler after the call. Handles
     custom timesteps. Any kwargs will be supplied to `scheduler.set_timesteps`.
 
@@ -214,8 +205,8 @@ class StableDiffusionImg2ImgPipeline(
             [`DDIMScheduler`], [`LMSDiscreteScheduler`], or [`PNDMScheduler`].
         safety_checker ([`StableDiffusionSafetyChecker`]):
             Classification module that estimates whether generated images could be considered offensive or harmful.
-            Please refer to the [model card](https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5) for
-            more details about a model's potential harms.
+            Please refer to the [model card](https://huggingface.co/runwayml/stable-diffusion-v1-5) for more details
+            about a model's potential harms.
         feature_extractor ([`~transformers.CLIPImageProcessor`]):
             A `CLIPImageProcessor` to extract features from generated images; used as inputs to the `safety_checker`.
     """
@@ -239,7 +230,7 @@ class StableDiffusionImg2ImgPipeline(
     ):
         super().__init__()
 
-        if scheduler is not None and getattr(scheduler.config, "steps_offset", 1) != 1:
+        if hasattr(scheduler.config, "steps_offset") and scheduler.config.steps_offset != 1:
             deprecation_message = (
                 f"The configuration file of this scheduler: {scheduler} is outdated. `steps_offset`"
                 f" should be set to 1 instead of {scheduler.config.steps_offset}. Please make sure "
@@ -253,7 +244,7 @@ class StableDiffusionImg2ImgPipeline(
             new_config["steps_offset"] = 1
             scheduler._internal_dict = FrozenDict(new_config)
 
-        if scheduler is not None and getattr(scheduler.config, "clip_sample", False) is True:
+        if hasattr(scheduler.config, "clip_sample") and scheduler.config.clip_sample is True:
             deprecation_message = (
                 f"The configuration file of this scheduler: {scheduler} has not set the configuration `clip_sample`."
                 " `clip_sample` should be set to False in the configuration file. Please make sure to update the"
@@ -282,21 +273,17 @@ class StableDiffusionImg2ImgPipeline(
                 " checker. If you do not want to use the safety checker, you can pass `'safety_checker=None'` instead."
             )
 
-        is_unet_version_less_0_9_0 = (
-            unet is not None
-            and hasattr(unet.config, "_diffusers_version")
-            and version.parse(version.parse(unet.config._diffusers_version).base_version) < version.parse("0.9.0.dev0")
-        )
-        is_unet_sample_size_less_64 = (
-            unet is not None and hasattr(unet.config, "sample_size") and unet.config.sample_size < 64
-        )
+        is_unet_version_less_0_9_0 = hasattr(unet.config, "_diffusers_version") and version.parse(
+            version.parse(unet.config._diffusers_version).base_version
+        ) < version.parse("0.9.0.dev0")
+        is_unet_sample_size_less_64 = hasattr(unet.config, "sample_size") and unet.config.sample_size < 64
         if is_unet_version_less_0_9_0 and is_unet_sample_size_less_64:
             deprecation_message = (
                 "The configuration file of the unet has set the default `sample_size` to smaller than"
                 " 64 which seems highly unlikely. If your checkpoint is a fine-tuned version of any of the"
                 " following: \n- CompVis/stable-diffusion-v1-4 \n- CompVis/stable-diffusion-v1-3 \n-"
-                " CompVis/stable-diffusion-v1-2 \n- CompVis/stable-diffusion-v1-1 \n- stable-diffusion-v1-5/stable-diffusion-v1-5"
-                " \n- stable-diffusion-v1-5/stable-diffusion-inpainting \n you should change 'sample_size' to 64 in the"
+                " CompVis/stable-diffusion-v1-2 \n- CompVis/stable-diffusion-v1-1 \n- runwayml/stable-diffusion-v1-5"
+                " \n- runwayml/stable-diffusion-inpainting \n you should change 'sample_size' to 64 in the"
                 " configuration file. Please make sure to update the config accordingly as leaving `sample_size=32`"
                 " in the config might lead to incorrect results in future versions. If you have downloaded this"
                 " checkpoint from the Hugging Face Hub, it would be very nice if you could open a Pull request for"
@@ -317,7 +304,7 @@ class StableDiffusionImg2ImgPipeline(
             feature_extractor=feature_extractor,
             image_encoder=image_encoder,
         )
-        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1) if getattr(self, "vae", None) else 8
+        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
         self.register_to_config(requires_safety_checker=requires_safety_checker)
 
@@ -639,7 +626,7 @@ class StableDiffusionImg2ImgPipeline(
     def prepare_extra_step_kwargs(self, generator, eta):
         # prepare extra kwargs for the scheduler step, since not all schedulers have the same signature
         # eta (η) is only used with the DDIMScheduler, it will be ignored for other schedulers.
-        # eta corresponds to η in DDIM paper: https://huggingface.co/papers/2010.02502
+        # eta corresponds to η in DDIM paper: https://arxiv.org/abs/2010.02502
         # and should be between [0, 1]
 
         accepts_eta = "eta" in set(inspect.signature(self.scheduler.step).parameters.keys())
@@ -837,7 +824,7 @@ class StableDiffusionImg2ImgPipeline(
         return self._clip_skip
 
     # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
-    # of the Imagen paper: https://huggingface.co/papers/2205.11487 . `guidance_scale = 1`
+    # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
     # corresponds to doing no classifier free guidance.
     @property
     def do_classifier_free_guidance(self):
@@ -922,8 +909,8 @@ class StableDiffusionImg2ImgPipeline(
             num_images_per_prompt (`int`, *optional*, defaults to 1):
                 The number of images to generate per prompt.
             eta (`float`, *optional*, defaults to 0.0):
-                Corresponds to parameter eta (η) from the [DDIM](https://huggingface.co/papers/2010.02502) paper. Only
-                applies to the [`~schedulers.DDIMScheduler`], and is ignored in other schedulers.
+                Corresponds to parameter eta (η) from the [DDIM](https://arxiv.org/abs/2010.02502) paper. Only applies
+                to the [`~schedulers.DDIMScheduler`], and is ignored in other schedulers.
             generator (`torch.Generator` or `List[torch.Generator]`, *optional*):
                 A [`torch.Generator`](https://pytorch.org/docs/stable/generated/torch.Generator.html) to make
                 generation deterministic.
@@ -1132,9 +1119,6 @@ class StableDiffusionImg2ImgPipeline(
                     if callback is not None and i % callback_steps == 0:
                         step_idx = i // getattr(self.scheduler, "order", 1)
                         callback(step_idx, t, latents)
-
-                if XLA_AVAILABLE:
-                    xm.mark_step()
 
         if not output_type == "latent":
             image = self.vae.decode(latents / self.vae.config.scaling_factor, return_dict=False, generator=generator)[

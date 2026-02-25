@@ -1,4 +1,4 @@
-# Copyright 2025 The HuggingFace Inc. team. All rights reserved.
+# Copyright 2024 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,12 +20,9 @@ from packaging import version
 from .. import __version__
 from .constants import (
     CONFIG_NAME,
-    DEFAULT_HF_PARALLEL_LOADING_WORKERS,
     DEPRECATED_REVISION_ARGS,
     DIFFUSERS_DYNAMIC_MODULE_NAME,
     FLAX_WEIGHTS_NAME,
-    GGUF_FILE_EXTENSION,
-    HF_ENABLE_PARALLEL_LOADING,
     HF_MODULES_CACHE,
     HUGGINGFACE_CO_RESOLVE_ENDPOINT,
     MIN_PEFT_VERSION,
@@ -64,41 +61,22 @@ from .import_utils import (
     get_objects_from_module,
     is_accelerate_available,
     is_accelerate_version,
-    is_better_profanity_available,
     is_bitsandbytes_available,
-    is_bitsandbytes_version,
     is_bs4_available,
-    is_cosmos_guardrail_available,
-    is_flash_attn_3_available,
-    is_flash_attn_available,
-    is_flash_attn_version,
     is_flax_available,
     is_ftfy_available,
-    is_gguf_available,
-    is_gguf_version,
     is_google_colab,
-    is_hf_hub_version,
-    is_hpu_available,
     is_inflect_available,
     is_invisible_watermark_available,
     is_k_diffusion_available,
     is_k_diffusion_version,
-    is_kernels_available,
-    is_kornia_available,
     is_librosa_available,
     is_matplotlib_available,
-    is_nltk_available,
     is_note_seq_available,
     is_onnx_available,
-    is_opencv_available,
-    is_optimum_quanto_available,
-    is_optimum_quanto_version,
     is_peft_available,
     is_peft_version,
-    is_pytorch_retinaface_available,
     is_safetensors_available,
-    is_sageattention_available,
-    is_sageattention_version,
     is_scipy_available,
     is_sentencepiece_available,
     is_tensorboard_available,
@@ -107,9 +85,6 @@ from .import_utils import (
     is_torch_npu_available,
     is_torch_version,
     is_torch_xla_available,
-    is_torch_xla_version,
-    is_torchao_available,
-    is_torchao_version,
     is_torchsde_available,
     is_torchvision_available,
     is_transformers_available,
@@ -117,10 +92,9 @@ from .import_utils import (
     is_unidecode_available,
     is_wandb_available,
     is_xformers_available,
-    is_xformers_version,
     requires_backends,
 )
-from .loading_utils import get_module_from_name, get_submodule_by_name, load_image, load_video
+from .loading_utils import load_image, load_video
 from .logging import get_logger
 from .outputs import BaseOutput
 from .peft_utils import (
@@ -135,16 +109,13 @@ from .peft_utils import (
     unscale_lora_layers,
 )
 from .pil_utils import PIL_INTERPOLATION, make_image_grid, numpy_to_pil, pt_to_pil
-from .remote_utils import remote_decode
 from .state_dict_utils import (
     convert_all_state_dict_to_peft,
     convert_state_dict_to_diffusers,
     convert_state_dict_to_kohya,
     convert_state_dict_to_peft,
     convert_unet_state_dict_to_peft,
-    state_dict_all_zero,
 )
-from .typing_utils import _get_detailed_type, _is_valid_type
 
 
 logger = get_logger(__name__)

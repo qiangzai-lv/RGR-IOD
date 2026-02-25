@@ -1,4 +1,4 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
+# Copyright 2024 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,20 +23,12 @@ from transformers import CLIPImageProcessor, CLIPTextModelWithProjection, CLIPTo
 
 from ...models import StableCascadeUNet
 from ...schedulers import DDPMWuerstchenScheduler
-from ...utils import BaseOutput, is_torch_xla_available, logging, replace_example_docstring
+from ...utils import BaseOutput, logging, replace_example_docstring
 from ...utils.torch_utils import randn_tensor
 from ..pipeline_utils import DiffusionPipeline
 
 
-if is_torch_xla_available():
-    import torch_xla.core.xla_model as xm
-
-    XLA_AVAILABLE = True
-else:
-    XLA_AVAILABLE = False
-
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
-
 
 DEFAULT_STAGE_C_TIMESTEPS = list(np.linspace(1.0, 2 / 3, 20)) + list(np.linspace(2 / 3, 0.0, 11))[1:]
 
@@ -409,11 +401,11 @@ class StableCascadePriorPipeline(DiffusionPipeline):
                 The number of denoising steps. More denoising steps usually lead to a higher quality image at the
                 expense of slower inference.
             guidance_scale (`float`, *optional*, defaults to 8.0):
-                Guidance scale as defined in [Classifier-Free Diffusion
-                Guidance](https://huggingface.co/papers/2207.12598). `decoder_guidance_scale` is defined as `w` of
-                equation 2. of [Imagen Paper](https://huggingface.co/papers/2205.11487). Guidance scale is enabled by
-                setting `decoder_guidance_scale > 1`. Higher guidance scale encourages to generate images that are
-                closely linked to the text `prompt`, usually at the expense of lower image quality.
+                Guidance scale as defined in [Classifier-Free Diffusion Guidance](https://arxiv.org/abs/2207.12598).
+                `decoder_guidance_scale` is defined as `w` of equation 2. of [Imagen
+                Paper](https://arxiv.org/pdf/2205.11487.pdf). Guidance scale is enabled by setting
+                `decoder_guidance_scale > 1`. Higher guidance scale encourages to generate images that are closely
+                linked to the text `prompt`, usually at the expense of lower image quality.
             negative_prompt (`str` or `List[str]`, *optional*):
                 The prompt or prompts not to guide the image generation. Ignored when not using guidance (i.e., ignored
                 if `decoder_guidance_scale` is less than `1`).
@@ -619,18 +611,15 @@ class StableCascadePriorPipeline(DiffusionPipeline):
                 prompt_embeds = callback_outputs.pop("prompt_embeds", prompt_embeds)
                 negative_prompt_embeds = callback_outputs.pop("negative_prompt_embeds", negative_prompt_embeds)
 
-            if XLA_AVAILABLE:
-                xm.mark_step()
-
         # Offload all models
         self.maybe_free_model_hooks()
 
         if output_type == "np":
-            latents = latents.cpu().float().numpy()  # float() as bfloat16-> numpy doesn't work
-            prompt_embeds = prompt_embeds.cpu().float().numpy()  # float() as bfloat16-> numpy doesn't work
+            latents = latents.cpu().float().numpy()  # float() as bfloat16-> numpy doesnt work
+            prompt_embeds = prompt_embeds.cpu().float().numpy()  # float() as bfloat16-> numpy doesnt work
             negative_prompt_embeds = (
                 negative_prompt_embeds.cpu().float().numpy() if negative_prompt_embeds is not None else None
-            )  # float() as bfloat16-> numpy doesn't work
+            )  # float() as bfloat16-> numpy doesnt work
 
         if not return_dict:
             return (

@@ -1,4 +1,4 @@
-# Copyright 2025 CVSSP, ByteDance and The HuggingFace Team. All rights reserved.
+# Copyright 2024 CVSSP, ByteDance and The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ import torch
 from transformers import (
     ClapFeatureExtractor,
     ClapModel,
-    GPT2LMHeadModel,
+    GPT2Model,
     RobertaTokenizer,
     RobertaTokenizerFast,
     SpeechT5HifiGan,
@@ -40,8 +40,7 @@ from ...utils import (
     logging,
     replace_example_docstring,
 )
-from ...utils.import_utils import is_transformers_version
-from ...utils.torch_utils import empty_device_cache, randn_tensor
+from ...utils.torch_utils import randn_tensor
 from ..pipeline_utils import AudioPipelineOutput, DiffusionPipeline
 from .modeling_audioldm2 import AudioLDM2ProjectionModel, AudioLDM2UNet2DConditionModel
 
@@ -49,19 +48,7 @@ from .modeling_audioldm2 import AudioLDM2ProjectionModel, AudioLDM2UNet2DConditi
 if is_librosa_available():
     import librosa
 
-
-from ...utils import is_torch_xla_available
-
-
-if is_torch_xla_available():
-    import torch_xla.core.xla_model as xm
-
-    XLA_AVAILABLE = True
-else:
-    XLA_AVAILABLE = False
-
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
-
 
 EXAMPLE_DOC_STRING = """
     Examples:
@@ -197,7 +184,7 @@ class AudioLDM2Pipeline(DiffusionPipeline):
         text_encoder: ClapModel,
         text_encoder_2: Union[T5EncoderModel, VitsModel],
         projection_model: AudioLDM2ProjectionModel,
-        language_model: GPT2LMHeadModel,
+        language_model: GPT2Model,
         tokenizer: Union[RobertaTokenizer, RobertaTokenizerFast],
         tokenizer_2: Union[T5Tokenizer, T5TokenizerFast, VitsTokenizer],
         feature_extractor: ClapFeatureExtractor,
@@ -220,7 +207,7 @@ class AudioLDM2Pipeline(DiffusionPipeline):
             scheduler=scheduler,
             vocoder=vocoder,
         )
-        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1) if getattr(self, "vae", None) else 8
+        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
 
     # Copied from diffusers.pipelines.pipeline_utils.StableDiffusionMixin.enable_vae_slicing
     def enable_vae_slicing(self):
@@ -238,7 +225,7 @@ class AudioLDM2Pipeline(DiffusionPipeline):
         """
         self.vae.disable_slicing()
 
-    def enable_model_cpu_offload(self, gpu_id: Optional[int] = None, device: Union[torch.device, str] = "cuda"):
+    def enable_model_cpu_offload(self, gpu_id=0):
         r"""
         Offloads all models to CPU using accelerate, reducing memory usage with a low impact on performance. Compared
         to `enable_sequential_cpu_offload`, this method moves one whole model at a time to the GPU when its `forward`
@@ -250,24 +237,11 @@ class AudioLDM2Pipeline(DiffusionPipeline):
         else:
             raise ImportError("`enable_model_cpu_offload` requires `accelerate v0.17.0` or higher.")
 
-        torch_device = torch.device(device)
-        device_index = torch_device.index
-
-        if gpu_id is not None and device_index is not None:
-            raise ValueError(
-                f"You have passed both `gpu_id`={gpu_id} and an index as part of the passed device `device`={device}"
-                f"Cannot pass both. Please make sure to either not define `gpu_id` or not pass the index as part of the device: `device`={torch_device.type}"
-            )
-
-        device_type = torch_device.type
-        device_str = device_type
-        if gpu_id or torch_device.index:
-            device_str = f"{device_str}:{gpu_id or torch_device.index}"
-        device = torch.device(device_str)
+        device = torch.device(f"cuda:{gpu_id}")
 
         if self.device.type != "cpu":
             self.to("cpu", silence_dtype_warnings=True)
-            empty_device_cache(device.type)
+            torch.cuda.empty_cache()  # otherwise we don't see the memory savings (but they probably exist)
 
         model_sequence = [
             self.text_encoder.text_model,
@@ -311,26 +285,16 @@ class AudioLDM2Pipeline(DiffusionPipeline):
             `inputs_embeds (`torch.Tensor` of shape `(batch_size, sequence_length, hidden_size)`):
                 The sequence of generated hidden-states.
         """
-        cache_position_kwargs = {}
-        if is_transformers_version("<", "4.52.1"):
-            cache_position_kwargs["input_ids"] = inputs_embeds
-        else:
-            cache_position_kwargs["seq_length"] = inputs_embeds.shape[0]
-            cache_position_kwargs["device"] = (
-                self.language_model.device if getattr(self, "language_model", None) is not None else self.device
-            )
-        cache_position_kwargs["model_kwargs"] = model_kwargs
         max_new_tokens = max_new_tokens if max_new_tokens is not None else self.language_model.config.max_new_tokens
-        model_kwargs = self.language_model._get_initial_cache_position(**cache_position_kwargs)
-
+        model_kwargs = self.language_model._get_initial_cache_position(inputs_embeds, model_kwargs)
         for _ in range(max_new_tokens):
             # prepare model inputs
             model_inputs = prepare_inputs_for_generation(inputs_embeds, **model_kwargs)
 
             # forward pass to get next hidden states
-            output = self.language_model(**model_inputs, output_hidden_states=True, return_dict=True)
+            output = self.language_model(**model_inputs, return_dict=True)
 
-            next_hidden_states = output.hidden_states[-1]
+            next_hidden_states = output.last_hidden_state
 
             # Update the model input
             inputs_embeds = torch.cat([inputs_embeds, next_hidden_states[:, -1:, :]], dim=1)
@@ -382,7 +346,7 @@ class AudioLDM2Pipeline(DiffusionPipeline):
                 *e.g.* prompt weighting. If not provided, negative_prompt_embeds will be computed from
                 `negative_prompt` input argument.
             generated_prompt_embeds (`torch.Tensor`, *optional*):
-                Pre-generated text embeddings from the GPT2 language model. Can be used to easily tweak text inputs,
+                Pre-generated text embeddings from the GPT2 langauge model. Can be used to easily tweak text inputs,
                  *e.g.* prompt weighting. If not provided, text embeddings will be generated from `prompt` input
                  argument.
             negative_generated_prompt_embeds (`torch.Tensor`, *optional*):
@@ -403,7 +367,7 @@ class AudioLDM2Pipeline(DiffusionPipeline):
             attention_mask (`torch.LongTensor`):
                 Attention mask to be applied to the `prompt_embeds`.
             generated_prompt_embeds (`torch.Tensor`):
-                Text embeddings generated from the GPT2 language model.
+                Text embeddings generated from the GPT2 langauge model.
 
         Example:
 
@@ -710,7 +674,7 @@ class AudioLDM2Pipeline(DiffusionPipeline):
     def prepare_extra_step_kwargs(self, generator, eta):
         # prepare extra kwargs for the scheduler step, since not all schedulers have the same signature
         # eta (η) is only used with the DDIMScheduler, it will be ignored for other schedulers.
-        # eta corresponds to η in DDIM paper: https://huggingface.co/papers/2010.02502
+        # eta corresponds to η in DDIM paper: https://arxiv.org/abs/2010.02502
         # and should be between [0, 1]
 
         accepts_eta = "eta" in set(inspect.signature(self.scheduler.step).parameters.keys())
@@ -800,7 +764,7 @@ class AudioLDM2Pipeline(DiffusionPipeline):
 
         if transcription is None:
             if self.text_encoder_2.config.model_type == "vits":
-                raise ValueError("Cannot forward without transcription. Please make sure to have transcription")
+                raise ValueError("Cannot forward without transcription. Please make sure to" " have transcription")
         elif transcription is not None and (
             not isinstance(transcription, str) and not isinstance(transcription, list)
         ):
@@ -897,8 +861,8 @@ class AudioLDM2Pipeline(DiffusionPipeline):
                 generated waveforms based on their cosine similarity with the text input in the joint text-audio
                 embedding space.
             eta (`float`, *optional*, defaults to 0.0):
-                Corresponds to parameter eta (η) from the [DDIM](https://huggingface.co/papers/2010.02502) paper. Only
-                applies to the [`~schedulers.DDIMScheduler`], and is ignored in other schedulers.
+                Corresponds to parameter eta (η) from the [DDIM](https://arxiv.org/abs/2010.02502) paper. Only applies
+                to the [`~schedulers.DDIMScheduler`], and is ignored in other schedulers.
             generator (`torch.Generator` or `List[torch.Generator]`, *optional*):
                 A [`torch.Generator`](https://pytorch.org/docs/stable/generated/torch.Generator.html) to make
                 generation deterministic.
@@ -913,7 +877,7 @@ class AudioLDM2Pipeline(DiffusionPipeline):
                 Pre-generated negative text embeddings. Can be used to easily tweak text inputs (prompt weighting). If
                 not provided, `negative_prompt_embeds` are generated from the `negative_prompt` input argument.
             generated_prompt_embeds (`torch.Tensor`, *optional*):
-                Pre-generated text embeddings from the GPT2 language model. Can be used to easily tweak text inputs,
+                Pre-generated text embeddings from the GPT2 langauge model. Can be used to easily tweak text inputs,
                  *e.g.* prompt weighting. If not provided, text embeddings will be generated from `prompt` input
                  argument.
             negative_generated_prompt_embeds (`torch.Tensor`, *optional*):
@@ -996,7 +960,7 @@ class AudioLDM2Pipeline(DiffusionPipeline):
 
         device = self._execution_device
         # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
-        # of the Imagen paper: https://huggingface.co/papers/2205.11487 . `guidance_scale = 1`
+        # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
         # corresponds to doing no classifier free guidance.
         do_classifier_free_guidance = guidance_scale > 1.0
 
@@ -1068,9 +1032,6 @@ class AudioLDM2Pipeline(DiffusionPipeline):
                     if callback is not None and i % callback_steps == 0:
                         step_idx = i // getattr(self.scheduler, "order", 1)
                         callback(step_idx, t, latents)
-
-                if XLA_AVAILABLE:
-                    xm.mark_step()
 
         self.maybe_free_model_hooks()
 

@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 HuggingFace Inc.
+# Copyright 2024 HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -33,14 +33,10 @@ from diffusers import (
 )
 from diffusers.image_processor import VaeImageProcessor
 from diffusers.utils.testing_utils import (
-    backend_empty_cache,
-    backend_max_memory_allocated,
-    backend_reset_max_memory_allocated,
-    backend_reset_peak_memory_stats,
     enable_full_determinism,
     floats_tensor,
     load_image,
-    require_torch_accelerator,
+    require_torch_gpu,
     slow,
     torch_device,
 )
@@ -210,6 +206,9 @@ class StableDiffusionInstructPix2PixPipelineFastTests(
         image = sd_pipe(**inputs).images
         image_slice = image[0, -3:, -3:, -1]
 
+        slice = [round(x, 4) for x in image_slice.flatten().tolist()]
+        print(",".join([str(x) for x in slice]))
+
         assert image.shape == (1, 32, 32, 3)
         expected_slice = np.array([0.7417, 0.3842, 0.4732, 0.5776, 0.5891, 0.5139, 0.4052, 0.5673, 0.4986])
 
@@ -270,17 +269,17 @@ class StableDiffusionInstructPix2PixPipelineFastTests(
 
 
 @slow
-@require_torch_accelerator
+@require_torch_gpu
 class StableDiffusionInstructPix2PixPipelineSlowTests(unittest.TestCase):
     def setUp(self):
         super().setUp()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def tearDown(self):
         super().tearDown()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def get_inputs(self, seed=0):
         generator = torch.manual_seed(seed)
@@ -388,21 +387,21 @@ class StableDiffusionInstructPix2PixPipelineSlowTests(unittest.TestCase):
         assert number_of_steps == 3
 
     def test_stable_diffusion_pipeline_with_sequential_cpu_offloading(self):
-        backend_empty_cache(torch_device)
-        backend_reset_max_memory_allocated(torch_device)
-        backend_reset_peak_memory_stats(torch_device)
+        torch.cuda.empty_cache()
+        torch.cuda.reset_max_memory_allocated()
+        torch.cuda.reset_peak_memory_stats()
 
         pipe = StableDiffusionInstructPix2PixPipeline.from_pretrained(
             "timbrooks/instruct-pix2pix", safety_checker=None, torch_dtype=torch.float16
         )
         pipe.set_progress_bar_config(disable=None)
         pipe.enable_attention_slicing(1)
-        pipe.enable_sequential_cpu_offload(device=torch_device)
+        pipe.enable_sequential_cpu_offload()
 
         inputs = self.get_inputs()
         _ = pipe(**inputs)
 
-        mem_bytes = backend_max_memory_allocated(torch_device)
+        mem_bytes = torch.cuda.max_memory_allocated()
         # make sure that less than 2.2 GB is allocated
         assert mem_bytes < 2.2 * 10**9
 

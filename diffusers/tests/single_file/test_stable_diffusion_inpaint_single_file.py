@@ -8,11 +8,9 @@ from diffusers import (
 )
 from diffusers.utils import load_image
 from diffusers.utils.testing_utils import (
-    backend_empty_cache,
     enable_full_determinism,
-    require_torch_accelerator,
+    require_torch_gpu,
     slow,
-    torch_device,
 )
 
 from .single_file_testing_utils import SDSingleFileTesterMixin
@@ -22,7 +20,7 @@ enable_full_determinism()
 
 
 @slow
-@require_torch_accelerator
+@require_torch_gpu
 class StableDiffusionInpaintPipelineSingleFileSlowTests(unittest.TestCase, SDSingleFileTesterMixin):
     pipeline_class = StableDiffusionInpaintPipeline
     ckpt_path = "https://huggingface.co/botp/stable-diffusion-v1-5-inpainting/blob/main/sd-v1-5-inpainting.ckpt"
@@ -32,12 +30,12 @@ class StableDiffusionInpaintPipelineSingleFileSlowTests(unittest.TestCase, SDSin
     def setUp(self):
         super().setUp()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def tearDown(self):
         super().tearDown()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def get_inputs(self, device, generator_device="cpu", dtype=torch.float32, seed=0):
         generator = torch.Generator(device=generator_device).manual_seed(seed)
@@ -65,7 +63,7 @@ class StableDiffusionInpaintPipelineSingleFileSlowTests(unittest.TestCase, SDSin
 
     def test_single_file_loading_4_channel_unet(self):
         # Test loading single file inpaint with a 4 channel UNet
-        ckpt_path = "https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5/blob/main/v1-5-pruned-emaonly.safetensors"
+        ckpt_path = "https://huggingface.co/Jiali/stable-diffusion-1.5/blob/main/v1-5-pruned-emaonly.safetensors"
         pipe = self.pipeline_class.from_single_file(ckpt_path)
 
         assert pipe.unet.config.in_channels == 4
@@ -80,7 +78,7 @@ class StableDiffusionInpaintPipelineSingleFileSlowTests(unittest.TestCase, SDSin
 
 
 @slow
-@require_torch_accelerator
+@require_torch_gpu
 class StableDiffusion21InpaintPipelineSingleFileSlowTests(unittest.TestCase, SDSingleFileTesterMixin):
     pipeline_class = StableDiffusionInpaintPipeline
     ckpt_path = (
@@ -92,12 +90,12 @@ class StableDiffusion21InpaintPipelineSingleFileSlowTests(unittest.TestCase, SDS
     def setUp(self):
         super().setUp()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def tearDown(self):
         super().tearDown()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def get_inputs(self, device, generator_device="cpu", dtype=torch.float32, seed=0):
         generator = torch.Generator(device=generator_device).manual_seed(seed)

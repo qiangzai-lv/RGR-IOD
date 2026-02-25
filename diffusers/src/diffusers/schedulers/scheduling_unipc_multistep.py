@@ -1,4 +1,4 @@
-# Copyright 2025 TSAIL Team and The HuggingFace Team. All rights reserved.
+# Copyright 2024 TSAIL Team and The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# DISCLAIMER: check https://huggingface.co/papers/2302.04867 and https://github.com/wl-zhao/UniPC for more info
+# DISCLAIMER: check https://arxiv.org/abs/2302.04867 and https://github.com/wl-zhao/UniPC for more info
 # The codebase is modified based on https://github.com/huggingface/diffusers/blob/main/src/diffusers/schedulers/scheduling_dpmsolver_multistep.py
 
 import math
@@ -22,12 +22,8 @@ import numpy as np
 import torch
 
 from ..configuration_utils import ConfigMixin, register_to_config
-from ..utils import deprecate, is_scipy_available
+from ..utils import deprecate
 from .scheduling_utils import KarrasDiffusionSchedulers, SchedulerMixin, SchedulerOutput
-
-
-if is_scipy_available():
-    import scipy.stats
 
 
 # Copied from diffusers.schedulers.scheduling_ddpm.betas_for_alpha_bar
@@ -78,7 +74,7 @@ def betas_for_alpha_bar(
 # Copied from diffusers.schedulers.scheduling_ddim.rescale_zero_terminal_snr
 def rescale_zero_terminal_snr(betas):
     """
-    Rescales betas to have zero terminal SNR Based on https://huggingface.co/papers/2305.08891 (Algorithm 1)
+    Rescales betas to have zero terminal SNR Based on https://arxiv.org/pdf/2305.08891.pdf (Algorithm 1)
 
 
     Args:
@@ -163,13 +159,6 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
         use_karras_sigmas (`bool`, *optional*, defaults to `False`):
             Whether to use Karras sigmas for step sizes in the noise schedule during the sampling process. If `True`,
             the sigmas are determined according to a sequence of noise levels {σi}.
-        use_exponential_sigmas (`bool`, *optional*, defaults to `False`):
-            Whether to use exponential sigmas for step sizes in the noise schedule during the sampling process.
-        use_beta_sigmas (`bool`, *optional*, defaults to `False`):
-            Whether to use beta sigmas for step sizes in the noise schedule during the sampling process. Refer to [Beta
-            Sampling is All You Need](https://huggingface.co/papers/2407.12173) for more information.
-        use_flow_sigmas (`bool`, *optional*, defaults to `False`):
-            Whether to use flow sigmas for step sizes in the noise schedule during the sampling process.
         timestep_spacing (`str`, defaults to `"linspace"`):
             The way the timesteps should be scaled. Refer to Table 2 of the [Common Diffusion Noise Schedules and
             Sample Steps are Flawed](https://huggingface.co/papers/2305.08891) for more information.
@@ -206,23 +195,11 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
         disable_corrector: List[int] = [],
         solver_p: SchedulerMixin = None,
         use_karras_sigmas: Optional[bool] = False,
-        use_exponential_sigmas: Optional[bool] = False,
-        use_beta_sigmas: Optional[bool] = False,
-        use_flow_sigmas: Optional[bool] = False,
-        flow_shift: Optional[float] = 1.0,
         timestep_spacing: str = "linspace",
         steps_offset: int = 0,
         final_sigmas_type: Optional[str] = "zero",  # "zero", "sigma_min"
         rescale_betas_zero_snr: bool = False,
-        use_dynamic_shifting: bool = False,
-        time_shift_type: str = "exponential",
     ):
-        if self.config.use_beta_sigmas and not is_scipy_available():
-            raise ImportError("Make sure to install scipy if you want to use beta sigmas.")
-        if sum([self.config.use_beta_sigmas, self.config.use_exponential_sigmas, self.config.use_karras_sigmas]) > 1:
-            raise ValueError(
-                "Only one of `config.use_beta_sigmas`, `config.use_exponential_sigmas`, `config.use_karras_sigmas` can be used."
-            )
         if trained_betas is not None:
             self.betas = torch.tensor(trained_betas, dtype=torch.float32)
         elif beta_schedule == "linear":
@@ -302,9 +279,7 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
         """
         self._begin_index = begin_index
 
-    def set_timesteps(
-        self, num_inference_steps: int, device: Union[str, torch.device] = None, mu: Optional[float] = None
-    ):
+    def set_timesteps(self, num_inference_steps: int, device: Union[str, torch.device] = None):
         """
         Sets the discrete timesteps used for the diffusion chain (to be run before inference).
 
@@ -314,10 +289,7 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
             device (`str` or `torch.device`, *optional*):
                 The device to which the timesteps should be moved to. If `None`, the timesteps are not moved.
         """
-        # "linspace", "leading", "trailing" corresponds to annotation of Table 2. of https://huggingface.co/papers/2305.08891
-        if mu is not None:
-            assert self.config.use_dynamic_shifting and self.config.time_shift_type == "exponential"
-            self.config.flow_shift = np.exp(mu)
+        # "linspace", "leading", "trailing" corresponds to annotation of Table 2. of https://arxiv.org/abs/2305.08891
         if self.config.timestep_spacing == "linspace":
             timesteps = (
                 np.linspace(0, self.config.num_train_timesteps - 1, num_inference_steps + 1)
@@ -348,48 +320,6 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
             sigmas = np.flip(sigmas).copy()
             sigmas = self._convert_to_karras(in_sigmas=sigmas, num_inference_steps=num_inference_steps)
             timesteps = np.array([self._sigma_to_t(sigma, log_sigmas) for sigma in sigmas]).round()
-            if self.config.final_sigmas_type == "sigma_min":
-                sigma_last = sigmas[-1]
-            elif self.config.final_sigmas_type == "zero":
-                sigma_last = 0
-            else:
-                raise ValueError(
-                    f"`final_sigmas_type` must be one of 'zero', or 'sigma_min', but got {self.config.final_sigmas_type}"
-                )
-            sigmas = np.concatenate([sigmas, [sigma_last]]).astype(np.float32)
-        elif self.config.use_exponential_sigmas:
-            log_sigmas = np.log(sigmas)
-            sigmas = np.flip(sigmas).copy()
-            sigmas = self._convert_to_exponential(in_sigmas=sigmas, num_inference_steps=num_inference_steps)
-            timesteps = np.array([self._sigma_to_t(sigma, log_sigmas) for sigma in sigmas])
-            if self.config.final_sigmas_type == "sigma_min":
-                sigma_last = sigmas[-1]
-            elif self.config.final_sigmas_type == "zero":
-                sigma_last = 0
-            else:
-                raise ValueError(
-                    f"`final_sigmas_type` must be one of 'zero', or 'sigma_min', but got {self.config.final_sigmas_type}"
-                )
-            sigmas = np.concatenate([sigmas, [sigma_last]]).astype(np.float32)
-        elif self.config.use_beta_sigmas:
-            log_sigmas = np.log(sigmas)
-            sigmas = np.flip(sigmas).copy()
-            sigmas = self._convert_to_beta(in_sigmas=sigmas, num_inference_steps=num_inference_steps)
-            timesteps = np.array([self._sigma_to_t(sigma, log_sigmas) for sigma in sigmas])
-            if self.config.final_sigmas_type == "sigma_min":
-                sigma_last = sigmas[-1]
-            elif self.config.final_sigmas_type == "zero":
-                sigma_last = 0
-            else:
-                raise ValueError(
-                    f"`final_sigmas_type` must be one of 'zero', or 'sigma_min', but got {self.config.final_sigmas_type}"
-                )
-            sigmas = np.concatenate([sigmas, [sigma_last]]).astype(np.float32)
-        elif self.config.use_flow_sigmas:
-            alphas = np.linspace(1, 1 / self.config.num_train_timesteps, num_inference_steps + 1)
-            sigmas = 1.0 - alphas
-            sigmas = np.flip(self.config.flow_shift * sigmas / (1 + (self.config.flow_shift - 1) * sigmas))[:-1].copy()
-            timesteps = (sigmas * self.config.num_train_timesteps).copy()
             if self.config.final_sigmas_type == "sigma_min":
                 sigma_last = sigmas[-1]
             elif self.config.final_sigmas_type == "zero":
@@ -438,7 +368,7 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
         pixels from saturation at each step. We find that dynamic thresholding results in significantly better
         photorealism as well as better image-text alignment, especially when using very large guidance weights."
 
-        https://huggingface.co/papers/2205.11487
+        https://arxiv.org/abs/2205.11487
         """
         dtype = sample.dtype
         batch_size, channels, *remaining_dims = sample.shape
@@ -489,12 +419,8 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
 
     # Copied from diffusers.schedulers.scheduling_dpmsolver_multistep.DPMSolverMultistepScheduler._sigma_to_alpha_sigma_t
     def _sigma_to_alpha_sigma_t(self, sigma):
-        if self.config.use_flow_sigmas:
-            alpha_t = 1 - sigma
-            sigma_t = sigma
-        else:
-            alpha_t = 1 / ((sigma**2 + 1) ** 0.5)
-            sigma_t = sigma * alpha_t
+        alpha_t = 1 / ((sigma**2 + 1) ** 0.5)
+        sigma_t = sigma * alpha_t
 
         return alpha_t, sigma_t
 
@@ -524,60 +450,6 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
         sigmas = (max_inv_rho + ramp * (min_inv_rho - max_inv_rho)) ** rho
         return sigmas
 
-    # Copied from diffusers.schedulers.scheduling_euler_discrete.EulerDiscreteScheduler._convert_to_exponential
-    def _convert_to_exponential(self, in_sigmas: torch.Tensor, num_inference_steps: int) -> torch.Tensor:
-        """Constructs an exponential noise schedule."""
-
-        # Hack to make sure that other schedulers which copy this function don't break
-        # TODO: Add this logic to the other schedulers
-        if hasattr(self.config, "sigma_min"):
-            sigma_min = self.config.sigma_min
-        else:
-            sigma_min = None
-
-        if hasattr(self.config, "sigma_max"):
-            sigma_max = self.config.sigma_max
-        else:
-            sigma_max = None
-
-        sigma_min = sigma_min if sigma_min is not None else in_sigmas[-1].item()
-        sigma_max = sigma_max if sigma_max is not None else in_sigmas[0].item()
-
-        sigmas = np.exp(np.linspace(math.log(sigma_max), math.log(sigma_min), num_inference_steps))
-        return sigmas
-
-    # Copied from diffusers.schedulers.scheduling_euler_discrete.EulerDiscreteScheduler._convert_to_beta
-    def _convert_to_beta(
-        self, in_sigmas: torch.Tensor, num_inference_steps: int, alpha: float = 0.6, beta: float = 0.6
-    ) -> torch.Tensor:
-        """From "Beta Sampling is All You Need" [arXiv:2407.12173] (Lee et. al, 2024)"""
-
-        # Hack to make sure that other schedulers which copy this function don't break
-        # TODO: Add this logic to the other schedulers
-        if hasattr(self.config, "sigma_min"):
-            sigma_min = self.config.sigma_min
-        else:
-            sigma_min = None
-
-        if hasattr(self.config, "sigma_max"):
-            sigma_max = self.config.sigma_max
-        else:
-            sigma_max = None
-
-        sigma_min = sigma_min if sigma_min is not None else in_sigmas[-1].item()
-        sigma_max = sigma_max if sigma_max is not None else in_sigmas[0].item()
-
-        sigmas = np.array(
-            [
-                sigma_min + (ppf * (sigma_max - sigma_min))
-                for ppf in [
-                    scipy.stats.beta.ppf(timestep, alpha, beta)
-                    for timestep in 1 - np.linspace(0, 1, num_inference_steps)
-                ]
-            ]
-        )
-        return sigmas
-
     def convert_model_output(
         self,
         model_output: torch.Tensor,
@@ -605,7 +477,7 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
             if len(args) > 1:
                 sample = args[1]
             else:
-                raise ValueError("missing `sample` as a required keyword argument")
+                raise ValueError("missing `sample` as a required keyward argument")
         if timestep is not None:
             deprecate(
                 "timesteps",
@@ -623,13 +495,10 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
                 x0_pred = model_output
             elif self.config.prediction_type == "v_prediction":
                 x0_pred = alpha_t * sample - sigma_t * model_output
-            elif self.config.prediction_type == "flow_prediction":
-                sigma_t = self.sigmas[self.step_index]
-                x0_pred = sample - sigma_t * model_output
             else:
                 raise ValueError(
-                    f"prediction_type given as {self.config.prediction_type} must be one of `epsilon`, `sample`, "
-                    "`v_prediction`, or `flow_prediction` for the UniPCMultistepScheduler."
+                    f"prediction_type given as {self.config.prediction_type} must be one of `epsilon`, `sample`, or"
+                    " `v_prediction` for the UniPCMultistepScheduler."
                 )
 
             if self.config.thresholding:
@@ -681,12 +550,12 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
             if len(args) > 1:
                 sample = args[1]
             else:
-                raise ValueError("missing `sample` as a required keyword argument")
+                raise ValueError(" missing `sample` as a required keyward argument")
         if order is None:
             if len(args) > 2:
                 order = args[2]
             else:
-                raise ValueError("missing `order` as a required keyword argument")
+                raise ValueError(" missing `order` as a required keyward argument")
         if prev_timestep is not None:
             deprecate(
                 "prev_timestep",
@@ -813,17 +682,17 @@ class UniPCMultistepScheduler(SchedulerMixin, ConfigMixin):
             if len(args) > 1:
                 last_sample = args[1]
             else:
-                raise ValueError("missing `last_sample` as a required keyword argument")
+                raise ValueError(" missing`last_sample` as a required keyward argument")
         if this_sample is None:
             if len(args) > 2:
                 this_sample = args[2]
             else:
-                raise ValueError("missing `this_sample` as a required keyword argument")
+                raise ValueError(" missing`this_sample` as a required keyward argument")
         if order is None:
             if len(args) > 3:
                 order = args[3]
             else:
-                raise ValueError("missing `order` as a required keyword argument")
+                raise ValueError(" missing`order` as a required keyward argument")
         if this_timestep is not None:
             deprecate(
                 "this_timestep",

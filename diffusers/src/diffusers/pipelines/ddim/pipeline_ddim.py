@@ -1,4 +1,4 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
+# Copyright 2024 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,19 +16,9 @@ from typing import List, Optional, Tuple, Union
 
 import torch
 
-from ...models import UNet2DModel
 from ...schedulers import DDIMScheduler
-from ...utils import is_torch_xla_available
 from ...utils.torch_utils import randn_tensor
 from ..pipeline_utils import DiffusionPipeline, ImagePipelineOutput
-
-
-if is_torch_xla_available():
-    import torch_xla.core.xla_model as xm
-
-    XLA_AVAILABLE = True
-else:
-    XLA_AVAILABLE = False
 
 
 class DDIMPipeline(DiffusionPipeline):
@@ -48,7 +38,7 @@ class DDIMPipeline(DiffusionPipeline):
 
     model_cpu_offload_seq = "unet"
 
-    def __init__(self, unet: UNet2DModel, scheduler: DDIMScheduler):
+    def __init__(self, unet, scheduler):
         super().__init__()
 
         # make sure scheduler can always be converted to DDIM
@@ -77,9 +67,9 @@ class DDIMPipeline(DiffusionPipeline):
                 A [`torch.Generator`](https://pytorch.org/docs/stable/generated/torch.Generator.html) to make
                 generation deterministic.
             eta (`float`, *optional*, defaults to 0.0):
-                Corresponds to parameter eta (η) from the [DDIM](https://huggingface.co/papers/2010.02502) paper. Only
-                applies to the [`~schedulers.DDIMScheduler`], and is ignored in other schedulers. A value of `0`
-                corresponds to DDIM and `1` corresponds to DDPM.
+                Corresponds to parameter eta (η) from the [DDIM](https://arxiv.org/abs/2010.02502) paper. Only applies
+                to the [`~schedulers.DDIMScheduler`], and is ignored in other schedulers. A value of `0` corresponds to
+                DDIM and `1` corresponds to DDPM.
             num_inference_steps (`int`, *optional*, defaults to 50):
                 The number of denoising steps. More denoising steps usually lead to a higher quality image at the
                 expense of slower inference.
@@ -152,9 +142,6 @@ class DDIMPipeline(DiffusionPipeline):
             image = self.scheduler.step(
                 model_output, t, image, eta=eta, use_clipped_model_output=use_clipped_model_output, generator=generator
             ).prev_sample
-
-            if XLA_AVAILABLE:
-                xm.mark_step()
 
         image = (image / 2 + 0.5).clamp(0, 1)
         image = image.cpu().permute(0, 2, 3, 1).numpy()

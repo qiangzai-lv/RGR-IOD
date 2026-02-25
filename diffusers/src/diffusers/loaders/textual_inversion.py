@@ -1,4 +1,4 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
+# Copyright 2024 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -40,7 +40,7 @@ def load_textual_inversion_state_dicts(pretrained_model_name_or_paths, **kwargs)
     force_download = kwargs.pop("force_download", False)
     proxies = kwargs.pop("proxies", None)
     local_files_only = kwargs.pop("local_files_only", None)
-    hf_token = kwargs.pop("hf_token", None)
+    token = kwargs.pop("token", None)
     revision = kwargs.pop("revision", None)
     subfolder = kwargs.pop("subfolder", None)
     weight_name = kwargs.pop("weight_name", None)
@@ -73,7 +73,7 @@ def load_textual_inversion_state_dicts(pretrained_model_name_or_paths, **kwargs)
                         force_download=force_download,
                         proxies=proxies,
                         local_files_only=local_files_only,
-                        token=hf_token,
+                        token=token,
                         revision=revision,
                         subfolder=subfolder,
                         user_agent=user_agent,
@@ -93,7 +93,7 @@ def load_textual_inversion_state_dicts(pretrained_model_name_or_paths, **kwargs)
                     force_download=force_download,
                     proxies=proxies,
                     local_files_only=local_files_only,
-                    token=hf_token,
+                    token=token,
                     revision=revision,
                     subfolder=subfolder,
                     user_agent=user_agent,
@@ -312,7 +312,7 @@ class TextualInversionLoaderMixin:
             local_files_only (`bool`, *optional*, defaults to `False`):
                 Whether to only load local model weights and configuration files or not. If set to `True`, the model
                 won't be downloaded from the Hub.
-            hf_token (`str` or *bool*, *optional*):
+            token (`str` or *bool*, *optional*):
                 The token to use as HTTP bearer authorization for remote files. If `True`, the token generated from
                 `diffusers-cli login` (stored in `~/.huggingface`) is used.
             revision (`str`, *optional*, defaults to `"main"`):
@@ -333,7 +333,7 @@ class TextualInversionLoaderMixin:
         from diffusers import StableDiffusionPipeline
         import torch
 
-        model_id = "stable-diffusion-v1-5/stable-diffusion-v1-5"
+        model_id = "runwayml/stable-diffusion-v1-5"
         pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float16).to("cuda")
 
         pipe.load_textual_inversion("sd-concepts-library/cat-toy")
@@ -352,7 +352,7 @@ class TextualInversionLoaderMixin:
         from diffusers import StableDiffusionPipeline
         import torch
 
-        model_id = "stable-diffusion-v1-5/stable-diffusion-v1-5"
+        model_id = "runwayml/stable-diffusion-v1-5"
         pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float16).to("cuda")
 
         pipe.load_textual_inversion("./charturnerv2.pt", token="charturnerv2")
@@ -427,8 +427,7 @@ class TextualInversionLoaderMixin:
                         logger.info(
                             "Accelerate hooks detected. Since you have called `load_textual_inversion()`, the previous hooks will be first removed. Then the textual inversion parameters will be loaded and the hooks will be applied again."
                         )
-                        if is_sequential_cpu_offload or is_model_cpu_offload:
-                            remove_hook_from_module(component, recurse=is_sequential_cpu_offload)
+                        remove_hook_from_module(component, recurse=is_sequential_cpu_offload)
 
         # 7.2 save expected device and dtype
         device = text_encoder.device
@@ -450,9 +449,9 @@ class TextualInversionLoaderMixin:
 
         # 7.5 Offload the model again
         if is_model_cpu_offload:
-            self.enable_model_cpu_offload(device=device)
+            self.enable_model_cpu_offload()
         elif is_sequential_cpu_offload:
-            self.enable_sequential_cpu_offload(device=device)
+            self.enable_sequential_cpu_offload()
 
         # / Unsafe Code >
 
@@ -470,7 +469,7 @@ class TextualInversionLoaderMixin:
         from diffusers import AutoPipelineForText2Image
         import torch
 
-        pipeline = AutoPipelineForText2Image.from_pretrained("stable-diffusion-v1-5/stable-diffusion-v1-5")
+        pipeline = AutoPipelineForText2Image.from_pretrained("runwayml/stable-diffusion-v1-5")
 
         # Example 1
         pipeline.load_textual_inversion("sd-concepts-library/gta5-artwork")
@@ -498,19 +497,19 @@ class TextualInversionLoaderMixin:
         # load embeddings of text_encoder 1 (CLIP ViT-L/14)
         pipeline.load_textual_inversion(
             state_dict["clip_l"],
-            tokens=["<s0>", "<s1>"],
+            token=["<s0>", "<s1>"],
             text_encoder=pipeline.text_encoder,
             tokenizer=pipeline.tokenizer,
         )
         # load embeddings of text_encoder 2 (CLIP ViT-G/14)
         pipeline.load_textual_inversion(
             state_dict["clip_g"],
-            tokens=["<s0>", "<s1>"],
+            token=["<s0>", "<s1>"],
             text_encoder=pipeline.text_encoder_2,
             tokenizer=pipeline.tokenizer_2,
         )
 
-        # Unload explicitly from both text encoders and tokenizers
+        # Unload explicitly from both text encoders abd tokenizers
         pipeline.unload_textual_inversion(
             tokens=["<s0>", "<s1>"], text_encoder=pipeline.text_encoder, tokenizer=pipeline.tokenizer
         )
@@ -562,8 +561,6 @@ class TextualInversionLoaderMixin:
                 tokenizer._added_tokens_encoder[token.content] = last_special_token_id + key_id
                 key_id += 1
         tokenizer._update_trie()
-        # set correct total vocab size after removing tokens
-        tokenizer._update_total_vocab_size()
 
         # Delete from text encoder
         text_embedding_dim = text_encoder.get_input_embeddings().embedding_dim

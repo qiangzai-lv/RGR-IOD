@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 The HuggingFace Inc. team.
+# Copyright 2024 The HuggingFace Inc. team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,12 +18,8 @@ from collections import OrderedDict
 from huggingface_hub.utils import validate_hf_hub_args
 
 from ..configuration_utils import ConfigMixin
-from ..models.controlnets import ControlNetUnionModel
 from ..utils import is_sentencepiece_available
 from .aura_flow import AuraFlowPipeline
-from .chroma import ChromaPipeline
-from .cogview3 import CogView3PlusPipeline
-from .cogview4 import CogView4ControlPipeline, CogView4Pipeline
 from .controlnet import (
     StableDiffusionControlNetImg2ImgPipeline,
     StableDiffusionControlNetInpaintPipeline,
@@ -31,25 +27,14 @@ from .controlnet import (
     StableDiffusionXLControlNetImg2ImgPipeline,
     StableDiffusionXLControlNetInpaintPipeline,
     StableDiffusionXLControlNetPipeline,
-    StableDiffusionXLControlNetUnionImg2ImgPipeline,
-    StableDiffusionXLControlNetUnionInpaintPipeline,
-    StableDiffusionXLControlNetUnionPipeline,
-)
-from .controlnet_sd3 import (
-    StableDiffusion3ControlNetInpaintingPipeline,
-    StableDiffusion3ControlNetPipeline,
 )
 from .deepfloyd_if import IFImg2ImgPipeline, IFInpaintingPipeline, IFPipeline
 from .flux import (
-    FluxControlImg2ImgPipeline,
-    FluxControlInpaintPipeline,
     FluxControlNetImg2ImgPipeline,
     FluxControlNetInpaintPipeline,
     FluxControlNetPipeline,
-    FluxControlPipeline,
     FluxImg2ImgPipeline,
     FluxInpaintPipeline,
-    FluxKontextPipeline,
     FluxPipeline,
 )
 from .hunyuandit import HunyuanDiTPipeline
@@ -71,18 +56,12 @@ from .kandinsky2_2 import (
 )
 from .kandinsky3 import Kandinsky3Img2ImgPipeline, Kandinsky3Pipeline
 from .latent_consistency_models import LatentConsistencyModelImg2ImgPipeline, LatentConsistencyModelPipeline
-from .lumina import LuminaPipeline
-from .lumina2 import Lumina2Pipeline
+from .lumina import LuminaText2ImgPipeline
 from .pag import (
     HunyuanDiTPAGPipeline,
     PixArtSigmaPAGPipeline,
-    SanaPAGPipeline,
-    StableDiffusion3PAGImg2ImgPipeline,
     StableDiffusion3PAGPipeline,
-    StableDiffusionControlNetPAGInpaintPipeline,
     StableDiffusionControlNetPAGPipeline,
-    StableDiffusionPAGImg2ImgPipeline,
-    StableDiffusionPAGInpaintPipeline,
     StableDiffusionPAGPipeline,
     StableDiffusionXLControlNetPAGImg2ImgPipeline,
     StableDiffusionXLControlNetPAGPipeline,
@@ -91,7 +70,6 @@ from .pag import (
     StableDiffusionXLPAGPipeline,
 )
 from .pixart_alpha import PixArtAlphaPipeline, PixArtSigmaPipeline
-from .sana import SanaPipeline
 from .stable_cascade import StableCascadeCombinedPipeline, StableCascadeDecoderPipeline
 from .stable_diffusion import (
     StableDiffusionImg2ImgPipeline,
@@ -125,15 +103,11 @@ AUTO_TEXT2IMAGE_PIPELINES_MAPPING = OrderedDict(
         ("kandinsky3", Kandinsky3Pipeline),
         ("stable-diffusion-controlnet", StableDiffusionControlNetPipeline),
         ("stable-diffusion-xl-controlnet", StableDiffusionXLControlNetPipeline),
-        ("stable-diffusion-xl-controlnet-union", StableDiffusionXLControlNetUnionPipeline),
-        ("stable-diffusion-3-controlnet", StableDiffusion3ControlNetPipeline),
         ("wuerstchen", WuerstchenCombinedPipeline),
         ("cascade", StableCascadeCombinedPipeline),
         ("lcm", LatentConsistencyModelPipeline),
         ("pixart-alpha", PixArtAlphaPipeline),
         ("pixart-sigma", PixArtSigmaPipeline),
-        ("sana", SanaPipeline),
-        ("sana-pag", SanaPAGPipeline),
         ("stable-diffusion-pag", StableDiffusionPAGPipeline),
         ("stable-diffusion-controlnet-pag", StableDiffusionControlNetPAGPipeline),
         ("stable-diffusion-xl-pag", StableDiffusionXLPAGPipeline),
@@ -141,15 +115,8 @@ AUTO_TEXT2IMAGE_PIPELINES_MAPPING = OrderedDict(
         ("pixart-sigma-pag", PixArtSigmaPAGPipeline),
         ("auraflow", AuraFlowPipeline),
         ("flux", FluxPipeline),
-        ("flux-control", FluxControlPipeline),
         ("flux-controlnet", FluxControlNetPipeline),
-        ("flux-kontext", FluxKontextPipeline),
-        ("lumina", LuminaPipeline),
-        ("lumina2", Lumina2Pipeline),
-        ("chroma", ChromaPipeline),
-        ("cogview3", CogView3PlusPipeline),
-        ("cogview4", CogView4Pipeline),
-        ("cogview4-control", CogView4ControlPipeline),
+        ("lumina", LuminaText2ImgPipeline),
     ]
 )
 
@@ -158,22 +125,17 @@ AUTO_IMAGE2IMAGE_PIPELINES_MAPPING = OrderedDict(
         ("stable-diffusion", StableDiffusionImg2ImgPipeline),
         ("stable-diffusion-xl", StableDiffusionXLImg2ImgPipeline),
         ("stable-diffusion-3", StableDiffusion3Img2ImgPipeline),
-        ("stable-diffusion-3-pag", StableDiffusion3PAGImg2ImgPipeline),
         ("if", IFImg2ImgPipeline),
         ("kandinsky", KandinskyImg2ImgCombinedPipeline),
         ("kandinsky22", KandinskyV22Img2ImgCombinedPipeline),
         ("kandinsky3", Kandinsky3Img2ImgPipeline),
         ("stable-diffusion-controlnet", StableDiffusionControlNetImg2ImgPipeline),
-        ("stable-diffusion-pag", StableDiffusionPAGImg2ImgPipeline),
         ("stable-diffusion-xl-controlnet", StableDiffusionXLControlNetImg2ImgPipeline),
-        ("stable-diffusion-xl-controlnet-union", StableDiffusionXLControlNetUnionImg2ImgPipeline),
         ("stable-diffusion-xl-pag", StableDiffusionXLPAGImg2ImgPipeline),
         ("stable-diffusion-xl-controlnet-pag", StableDiffusionXLControlNetPAGImg2ImgPipeline),
         ("lcm", LatentConsistencyModelImg2ImgPipeline),
         ("flux", FluxImg2ImgPipeline),
         ("flux-controlnet", FluxControlNetImg2ImgPipeline),
-        ("flux-control", FluxControlImg2ImgPipeline),
-        ("flux-kontext", FluxKontextPipeline),
     ]
 )
 
@@ -186,15 +148,10 @@ AUTO_INPAINT_PIPELINES_MAPPING = OrderedDict(
         ("kandinsky", KandinskyInpaintCombinedPipeline),
         ("kandinsky22", KandinskyV22InpaintCombinedPipeline),
         ("stable-diffusion-controlnet", StableDiffusionControlNetInpaintPipeline),
-        ("stable-diffusion-controlnet-pag", StableDiffusionControlNetPAGInpaintPipeline),
         ("stable-diffusion-xl-controlnet", StableDiffusionXLControlNetInpaintPipeline),
-        ("stable-diffusion-xl-controlnet-union", StableDiffusionXLControlNetUnionInpaintPipeline),
-        ("stable-diffusion-3-controlnet", StableDiffusion3ControlNetInpaintingPipeline),
         ("stable-diffusion-xl-pag", StableDiffusionXLPAGInpaintPipeline),
         ("flux", FluxInpaintPipeline),
         ("flux-controlnet", FluxControlNetInpaintPipeline),
-        ("flux-control", FluxControlInpaintPipeline),
-        ("stable-diffusion-pag", StableDiffusionPAGInpaintPipeline),
     ]
 )
 
@@ -251,15 +208,14 @@ def _get_connected_pipeline(pipeline_cls):
         return _get_task_class(AUTO_INPAINT_PIPELINES_MAPPING, pipeline_cls.__name__, throw_error_if_not_exist=False)
 
 
-def _get_model(pipeline_class_name):
-    for task_mapping in SUPPORTED_TASKS_MAPPINGS:
-        for model_name, pipeline in task_mapping.items():
-            if pipeline.__name__ == pipeline_class_name:
-                return model_name
-
-
 def _get_task_class(mapping, pipeline_class_name, throw_error_if_not_exist: bool = True):
-    model_name = _get_model(pipeline_class_name)
+    def get_model(pipeline_class_name):
+        for task_mapping in SUPPORTED_TASKS_MAPPINGS:
+            for model_name, pipeline in task_mapping.items():
+                if pipeline.__name__ == pipeline_class_name:
+                    return model_name
+
+    model_name = get_model(pipeline_class_name)
 
     if model_name is not None:
         task_class = mapping.get(model_name, None)
@@ -314,7 +270,7 @@ class AutoPipelineForText2Image(ConfigMixin):
         If you get the error message below, you need to finetune the weights for your downstream task:
 
         ```
-        Some weights of UNet2DConditionModel were not initialized from the model checkpoint at stable-diffusion-v1-5/stable-diffusion-v1-5 and are newly initialized because the shapes did not match:
+        Some weights of UNet2DConditionModel were not initialized from the model checkpoint at runwayml/stable-diffusion-v1-5 and are newly initialized because the shapes did not match:
         - conv_in.weight: found shape torch.Size([320, 4, 3, 3]) in the checkpoint and torch.Size([320, 9, 3, 3]) in the model instantiated
         You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
         ```
@@ -328,8 +284,9 @@ class AutoPipelineForText2Image(ConfigMixin):
                     - A path to a *directory* (for example `./my_pipeline_directory/`) containing pipeline weights
                       saved using
                     [`~DiffusionPipeline.save_pretrained`].
-            torch_dtype (`torch.dtype`, *optional*):
-                Override the default `torch.dtype` and load the model with another dtype.
+            torch_dtype (`str` or `torch.dtype`, *optional*):
+                Override the default `torch.dtype` and load the model with another dtype. If "auto" is passed, the
+                dtype is automatically derived from the model's weights.
             force_download (`bool`, *optional*, defaults to `False`):
                 Whether or not to force the (re-)download of the model weights and configuration files, overriding the
                 cached versions if they exist.
@@ -395,8 +352,8 @@ class AutoPipelineForText2Image(ConfigMixin):
 
         <Tip>
 
-        To use private or [gated](https://huggingface.co/docs/hub/models-gated#gated-models) models, log-in with `hf
-        auth login`.
+        To use private or [gated](https://huggingface.co/docs/hub/models-gated#gated-models) models, log-in with
+        `huggingface-cli login`.
 
         </Tip>
 
@@ -405,7 +362,7 @@ class AutoPipelineForText2Image(ConfigMixin):
         ```py
         >>> from diffusers import AutoPipelineForText2Image
 
-        >>> pipeline = AutoPipelineForText2Image.from_pretrained("stable-diffusion-v1-5/stable-diffusion-v1-5")
+        >>> pipeline = AutoPipelineForText2Image.from_pretrained("runwayml/stable-diffusion-v1-5")
         >>> image = pipeline(prompt).images[0]
         ```
         """
@@ -427,20 +384,13 @@ class AutoPipelineForText2Image(ConfigMixin):
 
         config = cls.load_config(pretrained_model_or_path, **load_config_kwargs)
         orig_class_name = config["_class_name"]
-        if "ControlPipeline" in orig_class_name:
-            to_replace = "ControlPipeline"
-        else:
-            to_replace = "Pipeline"
 
         if "controlnet" in kwargs:
-            if isinstance(kwargs["controlnet"], ControlNetUnionModel):
-                orig_class_name = config["_class_name"].replace(to_replace, "ControlNetUnionPipeline")
-            else:
-                orig_class_name = config["_class_name"].replace(to_replace, "ControlNetPipeline")
+            orig_class_name = config["_class_name"].replace("Pipeline", "ControlNetPipeline")
         if "enable_pag" in kwargs:
             enable_pag = kwargs.pop("enable_pag")
             if enable_pag:
-                orig_class_name = orig_class_name.replace(to_replace, "PAGPipeline")
+                orig_class_name = orig_class_name.replace("Pipeline", "PAGPipeline")
 
         text_2_image_cls = _get_task_class(AUTO_TEXT2IMAGE_PIPELINES_MAPPING, orig_class_name)
 
@@ -468,7 +418,7 @@ class AutoPipelineForText2Image(ConfigMixin):
         >>> from diffusers import AutoPipelineForText2Image, AutoPipelineForImage2Image
 
         >>> pipe_i2i = AutoPipelineForImage2Image.from_pretrained(
-        ...     "stable-diffusion-v1-5/stable-diffusion-v1-5", requires_safety_checker=False
+        ...     "runwayml/stable-diffusion-v1-5", requires_safety_checker=False
         ... )
 
         >>> pipe_t2i = AutoPipelineForText2Image.from_pipe(pipe_i2i)
@@ -548,9 +498,7 @@ class AutoPipelineForText2Image(ConfigMixin):
             if k not in text_2_image_kwargs
         }
 
-        missing_modules = (
-            set(expected_modules) - set(text_2_image_cls._optional_components) - set(text_2_image_kwargs.keys())
-        )
+        missing_modules = set(expected_modules) - set(pipeline._optional_components) - set(text_2_image_kwargs.keys())
 
         if len(missing_modules) > 0:
             raise ValueError(
@@ -609,7 +557,7 @@ class AutoPipelineForImage2Image(ConfigMixin):
         If you get the error message below, you need to finetune the weights for your downstream task:
 
         ```
-        Some weights of UNet2DConditionModel were not initialized from the model checkpoint at stable-diffusion-v1-5/stable-diffusion-v1-5 and are newly initialized because the shapes did not match:
+        Some weights of UNet2DConditionModel were not initialized from the model checkpoint at runwayml/stable-diffusion-v1-5 and are newly initialized because the shapes did not match:
         - conv_in.weight: found shape torch.Size([320, 4, 3, 3]) in the checkpoint and torch.Size([320, 9, 3, 3]) in the model instantiated
         You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
         ```
@@ -624,7 +572,8 @@ class AutoPipelineForImage2Image(ConfigMixin):
                       saved using
                     [`~DiffusionPipeline.save_pretrained`].
             torch_dtype (`str` or `torch.dtype`, *optional*):
-                Override the default `torch.dtype` and load the model with another dtype.
+                Override the default `torch.dtype` and load the model with another dtype. If "auto" is passed, the
+                dtype is automatically derived from the model's weights.
             force_download (`bool`, *optional*, defaults to `False`):
                 Whether or not to force the (re-)download of the model weights and configuration files, overriding the
                 cached versions if they exist.
@@ -690,8 +639,8 @@ class AutoPipelineForImage2Image(ConfigMixin):
 
         <Tip>
 
-        To use private or [gated](https://huggingface.co/docs/hub/models-gated#gated-models) models, log-in with `hf
-        auth login`.
+        To use private or [gated](https://huggingface.co/docs/hub/models-gated#gated-models) models, log-in with
+        `huggingface-cli login`.
 
         </Tip>
 
@@ -700,7 +649,7 @@ class AutoPipelineForImage2Image(ConfigMixin):
         ```py
         >>> from diffusers import AutoPipelineForImage2Image
 
-        >>> pipeline = AutoPipelineForImage2Image.from_pretrained("stable-diffusion-v1-5/stable-diffusion-v1-5")
+        >>> pipeline = AutoPipelineForImage2Image.from_pretrained("runwayml/stable-diffusion-v1-5")
         >>> image = pipeline(prompt, image).images[0]
         ```
         """
@@ -725,27 +674,15 @@ class AutoPipelineForImage2Image(ConfigMixin):
 
         # the `orig_class_name` can be:
         # `- *Pipeline` (for regular text-to-image checkpoint)
-        #  - `*ControlPipeline` (for Flux tools specific checkpoint)
         # `- *Img2ImgPipeline` (for refiner checkpoint)
-        if "Img2Img" in orig_class_name:
-            to_replace = "Img2ImgPipeline"
-        elif "ControlPipeline" in orig_class_name:
-            to_replace = "ControlPipeline"
-        else:
-            to_replace = "Pipeline"
+        to_replace = "Img2ImgPipeline" if "Img2Img" in config["_class_name"] else "Pipeline"
 
         if "controlnet" in kwargs:
-            if isinstance(kwargs["controlnet"], ControlNetUnionModel):
-                orig_class_name = orig_class_name.replace(to_replace, "ControlNetUnion" + to_replace)
-            else:
-                orig_class_name = orig_class_name.replace(to_replace, "ControlNet" + to_replace)
+            orig_class_name = orig_class_name.replace(to_replace, "ControlNet" + to_replace)
         if "enable_pag" in kwargs:
             enable_pag = kwargs.pop("enable_pag")
             if enable_pag:
                 orig_class_name = orig_class_name.replace(to_replace, "PAG" + to_replace)
-
-        if to_replace == "ControlPipeline":
-            orig_class_name = orig_class_name.replace(to_replace, "ControlImg2ImgPipeline")
 
         image_2_image_cls = _get_task_class(AUTO_IMAGE2IMAGE_PIPELINES_MAPPING, orig_class_name)
 
@@ -775,7 +712,7 @@ class AutoPipelineForImage2Image(ConfigMixin):
         >>> from diffusers import AutoPipelineForText2Image, AutoPipelineForImage2Image
 
         >>> pipe_t2i = AutoPipelineForText2Image.from_pretrained(
-        ...     "stable-diffusion-v1-5/stable-diffusion-v1-5", requires_safety_checker=False
+        ...     "runwayml/stable-diffusion-v1-5", requires_safety_checker=False
         ... )
 
         >>> pipe_i2i = AutoPipelineForImage2Image.from_pipe(pipe_t2i)
@@ -859,9 +796,7 @@ class AutoPipelineForImage2Image(ConfigMixin):
             if k not in image_2_image_kwargs
         }
 
-        missing_modules = (
-            set(expected_modules) - set(image_2_image_cls._optional_components) - set(image_2_image_kwargs.keys())
-        )
+        missing_modules = set(expected_modules) - set(pipeline._optional_components) - set(image_2_image_kwargs.keys())
 
         if len(missing_modules) > 0:
             raise ValueError(
@@ -919,7 +854,7 @@ class AutoPipelineForInpainting(ConfigMixin):
         If you get the error message below, you need to finetune the weights for your downstream task:
 
         ```
-        Some weights of UNet2DConditionModel were not initialized from the model checkpoint at stable-diffusion-v1-5/stable-diffusion-v1-5 and are newly initialized because the shapes did not match:
+        Some weights of UNet2DConditionModel were not initialized from the model checkpoint at runwayml/stable-diffusion-v1-5 and are newly initialized because the shapes did not match:
         - conv_in.weight: found shape torch.Size([320, 4, 3, 3]) in the checkpoint and torch.Size([320, 9, 3, 3]) in the model instantiated
         You should probably TRAIN this model on a down-stream task to be able to use it for predictions and inference.
         ```
@@ -934,7 +869,8 @@ class AutoPipelineForInpainting(ConfigMixin):
                       saved using
                     [`~DiffusionPipeline.save_pretrained`].
             torch_dtype (`str` or `torch.dtype`, *optional*):
-                Override the default `torch.dtype` and load the model with another dtype.
+                Override the default `torch.dtype` and load the model with another dtype. If "auto" is passed, the
+                dtype is automatically derived from the model's weights.
             force_download (`bool`, *optional*, defaults to `False`):
                 Whether or not to force the (re-)download of the model weights and configuration files, overriding the
                 cached versions if they exist.
@@ -1000,8 +936,8 @@ class AutoPipelineForInpainting(ConfigMixin):
 
         <Tip>
 
-        To use private or [gated](https://huggingface.co/docs/hub/models-gated#gated-models) models, log-in with `hf
-        auth login`.
+        To use private or [gated](https://huggingface.co/docs/hub/models-gated#gated-models) models, log-in with
+        `huggingface-cli login`.
 
         </Tip>
 
@@ -1010,7 +946,7 @@ class AutoPipelineForInpainting(ConfigMixin):
         ```py
         >>> from diffusers import AutoPipelineForInpainting
 
-        >>> pipeline = AutoPipelineForInpainting.from_pretrained("stable-diffusion-v1-5/stable-diffusion-v1-5")
+        >>> pipeline = AutoPipelineForInpainting.from_pretrained("runwayml/stable-diffusion-v1-5")
         >>> image = pipeline(prompt, image=init_image, mask_image=mask_image).images[0]
         ```
         """
@@ -1035,26 +971,15 @@ class AutoPipelineForInpainting(ConfigMixin):
 
         # The `orig_class_name`` can be:
         # `- *InpaintPipeline` (for inpaint-specific checkpoint)
-        #  - `*ControlPipeline` (for Flux tools specific checkpoint)
         #  - or *Pipeline (for regular text-to-image checkpoint)
-        if "Inpaint" in orig_class_name:
-            to_replace = "InpaintPipeline"
-        elif "ControlPipeline" in orig_class_name:
-            to_replace = "ControlPipeline"
-        else:
-            to_replace = "Pipeline"
+        to_replace = "InpaintPipeline" if "Inpaint" in config["_class_name"] else "Pipeline"
 
         if "controlnet" in kwargs:
-            if isinstance(kwargs["controlnet"], ControlNetUnionModel):
-                orig_class_name = orig_class_name.replace(to_replace, "ControlNetUnion" + to_replace)
-            else:
-                orig_class_name = orig_class_name.replace(to_replace, "ControlNet" + to_replace)
+            orig_class_name = orig_class_name.replace(to_replace, "ControlNet" + to_replace)
         if "enable_pag" in kwargs:
             enable_pag = kwargs.pop("enable_pag")
             if enable_pag:
                 orig_class_name = orig_class_name.replace(to_replace, "PAG" + to_replace)
-        if to_replace == "ControlPipeline":
-            orig_class_name = orig_class_name.replace(to_replace, "ControlInpaintPipeline")
         inpainting_cls = _get_task_class(AUTO_INPAINT_PIPELINES_MAPPING, orig_class_name)
 
         kwargs = {**load_config_kwargs, **kwargs}
@@ -1163,9 +1088,7 @@ class AutoPipelineForInpainting(ConfigMixin):
             if k not in inpainting_kwargs
         }
 
-        missing_modules = (
-            set(expected_modules) - set(inpainting_cls._optional_components) - set(inpainting_kwargs.keys())
-        )
+        missing_modules = set(expected_modules) - set(pipeline._optional_components) - set(inpainting_kwargs.keys())
 
         if len(missing_modules) > 0:
             raise ValueError(

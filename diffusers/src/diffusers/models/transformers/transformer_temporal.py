@@ -1,4 +1,4 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
+# Copyright 2024 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -66,8 +66,6 @@ class TransformerTemporalModel(ModelMixin, ConfigMixin):
         num_positional_embeddings: (`int`, *optional*):
             The maximum length of the sequence over which to apply positional embeddings.
     """
-
-    _skip_layerwise_casting_patterns = ["norm"]
 
     @register_to_config
     def __init__(
@@ -342,12 +340,20 @@ class TransformerSpatioTemporalModel(nn.Module):
 
         # 2. Blocks
         for block, temporal_block in zip(self.transformer_blocks, self.temporal_transformer_blocks):
-            if torch.is_grad_enabled() and self.gradient_checkpointing:
-                hidden_states = self._gradient_checkpointing_func(
-                    block, hidden_states, None, encoder_hidden_states, None
+            if self.training and self.gradient_checkpointing:
+                hidden_states = torch.utils.checkpoint.checkpoint(
+                    block,
+                    hidden_states,
+                    None,
+                    encoder_hidden_states,
+                    None,
+                    use_reentrant=False,
                 )
             else:
-                hidden_states = block(hidden_states, encoder_hidden_states=encoder_hidden_states)
+                hidden_states = block(
+                    hidden_states,
+                    encoder_hidden_states=encoder_hidden_states,
+                )
 
             hidden_states_mix = hidden_states
             hidden_states_mix = hidden_states_mix + emb

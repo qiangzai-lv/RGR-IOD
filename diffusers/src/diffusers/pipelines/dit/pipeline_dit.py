@@ -4,7 +4,7 @@
 # Copyright (c) 2021 OpenAI
 # MIT License
 #
-# Copyright 2025 The HuggingFace Team. All rights reserved.
+# Copyright 2024 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -24,17 +24,8 @@ import torch
 
 from ...models import AutoencoderKL, DiTTransformer2DModel
 from ...schedulers import KarrasDiffusionSchedulers
-from ...utils import is_torch_xla_available
 from ...utils.torch_utils import randn_tensor
 from ..pipeline_utils import DiffusionPipeline, ImagePipelineOutput
-
-
-if is_torch_xla_available():
-    import torch_xla.core.xla_model as xm
-
-    XLA_AVAILABLE = True
-else:
-    XLA_AVAILABLE = False
 
 
 class DiTPipeline(DiffusionPipeline):
@@ -46,9 +37,7 @@ class DiTPipeline(DiffusionPipeline):
 
     Parameters:
         transformer ([`DiTTransformer2DModel`]):
-            A class conditioned `DiTTransformer2DModel` to denoise the encoded image latents. Initially published as
-            [`Transformer2DModel`](https://huggingface.co/facebook/DiT-XL-2-256/blob/main/transformer/config.json#L2)
-            in the config, but the mismatch can be ignored.
+            A class conditioned `DiTTransformer2DModel` to denoise the encoded image latents.
         vae ([`AutoencoderKL`]):
             Variational Auto-Encoder (VAE) model to encode and decode images to and from latent representations.
         scheduler ([`DDIMScheduler`]):
@@ -189,11 +178,10 @@ class DiTPipeline(DiffusionPipeline):
                 # TODO: this requires sync between CPU and GPU. So try to pass timesteps as tensors if you can
                 # This would be a good case for the `match` statement (Python 3.10+)
                 is_mps = latent_model_input.device.type == "mps"
-                is_npu = latent_model_input.device.type == "npu"
                 if isinstance(timesteps, float):
-                    dtype = torch.float32 if (is_mps or is_npu) else torch.float64
+                    dtype = torch.float32 if is_mps else torch.float64
                 else:
-                    dtype = torch.int32 if (is_mps or is_npu) else torch.int64
+                    dtype = torch.int32 if is_mps else torch.int64
                 timesteps = torch.tensor([timesteps], dtype=dtype, device=latent_model_input.device)
             elif len(timesteps.shape) == 0:
                 timesteps = timesteps[None].to(latent_model_input.device)
@@ -222,9 +210,6 @@ class DiTPipeline(DiffusionPipeline):
 
             # compute previous image: x_t -> x_t-1
             latent_model_input = self.scheduler.step(model_output, t, latent_model_input).prev_sample
-
-            if XLA_AVAILABLE:
-                xm.mark_step()
 
         if guidance_scale > 1:
             latents, _ = latent_model_input.chunk(2, dim=0)

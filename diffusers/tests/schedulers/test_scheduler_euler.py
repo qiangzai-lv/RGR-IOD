@@ -245,9 +245,9 @@ class EulerDiscreteSchedulerTest(SchedulerCommonTest):
                         interpolation_type=interpolation_type,
                         final_sigmas_type=final_sigmas_type,
                     )
-                    assert torch.sum(torch.abs(sample - sample_custom_timesteps)) < 1e-5, (
-                        f"Scheduler outputs are not identical for prediction_type: {prediction_type}, interpolation_type: {interpolation_type} and final_sigmas_type: {final_sigmas_type}"
-                    )
+                    assert (
+                        torch.sum(torch.abs(sample - sample_custom_timesteps)) < 1e-5
+                    ), f"Scheduler outputs are not identical for prediction_type: {prediction_type}, interpolation_type: {interpolation_type} and final_sigmas_type: {final_sigmas_type}"
 
     def test_custom_sigmas(self):
         for prediction_type in ["epsilon", "sample", "v_prediction"]:
@@ -260,12 +260,6 @@ class EulerDiscreteSchedulerTest(SchedulerCommonTest):
                     prediction_type=prediction_type,
                     final_sigmas_type=final_sigmas_type,
                 )
-                assert torch.sum(torch.abs(sample - sample_custom_timesteps)) < 1e-5, (
-                    f"Scheduler outputs are not identical for prediction_type: {prediction_type} and final_sigmas_type: {final_sigmas_type}"
-                )
-
-    def test_beta_sigmas(self):
-        self.check_over_configs(use_beta_sigmas=True)
-
-    def test_exponential_sigmas(self):
-        self.check_over_configs(use_exponential_sigmas=True)
+                assert (
+                    torch.sum(torch.abs(sample - sample_custom_timesteps)) < 1e-5
+                ), f"Scheduler outputs are not identical for prediction_type: {prediction_type} and final_sigmas_type: {final_sigmas_type}"

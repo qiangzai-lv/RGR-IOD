@@ -1,4 +1,4 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
+# Copyright 2024 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -28,7 +28,6 @@ from ...schedulers import KarrasDiffusionSchedulers
 from ...utils import (
     USE_PEFT_BACKEND,
     deprecate,
-    is_torch_xla_available,
     logging,
     replace_example_docstring,
     scale_lora_layers,
@@ -39,15 +38,7 @@ from ..pipeline_utils import DiffusionPipeline, ImagePipelineOutput, StableDiffu
 from .stable_unclip_image_normalizer import StableUnCLIPImageNormalizer
 
 
-if is_torch_xla_available():
-    import torch_xla.core.xla_model as xm
-
-    XLA_AVAILABLE = True
-else:
-    XLA_AVAILABLE = False
-
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
-
 
 EXAMPLE_DOC_STRING = """
     Examples:
@@ -141,7 +132,7 @@ class StableUnCLIPPipeline(
         image_noising_scheduler: KarrasDiffusionSchedulers,
         # regular denoising components
         tokenizer: CLIPTokenizer,
-        text_encoder: CLIPTextModel,
+        text_encoder: CLIPTextModelWithProjection,
         unet: UNet2DConditionModel,
         scheduler: KarrasDiffusionSchedulers,
         # vae
@@ -163,7 +154,7 @@ class StableUnCLIPPipeline(
             vae=vae,
         )
 
-        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1) if getattr(self, "vae", None) else 8
+        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
 
     # Copied from diffusers.pipelines.unclip.pipeline_unclip.UnCLIPPipeline._encode_prompt with _encode_prompt->_encode_prior_prompt, tokenizer->prior_tokenizer, text_encoder->prior_text_encoder
@@ -492,7 +483,7 @@ class StableUnCLIPPipeline(
     def prepare_prior_extra_step_kwargs(self, generator, eta):
         # prepare extra kwargs for the prior_scheduler step, since not all prior_schedulers have the same signature
         # eta (η) is only used with the DDIMScheduler, it will be ignored for other prior_schedulers.
-        # eta corresponds to η in DDIM paper: https://huggingface.co/papers/2010.02502
+        # eta corresponds to η in DDIM paper: https://arxiv.org/abs/2010.02502
         # and should be between [0, 1]
 
         accepts_eta = "eta" in set(inspect.signature(self.prior_scheduler.step).parameters.keys())
@@ -510,7 +501,7 @@ class StableUnCLIPPipeline(
     def prepare_extra_step_kwargs(self, generator, eta):
         # prepare extra kwargs for the scheduler step, since not all schedulers have the same signature
         # eta (η) is only used with the DDIMScheduler, it will be ignored for other schedulers.
-        # eta corresponds to η in DDIM paper: https://huggingface.co/papers/2010.02502
+        # eta corresponds to η in DDIM paper: https://arxiv.org/abs/2010.02502
         # and should be between [0, 1]
 
         accepts_eta = "eta" in set(inspect.signature(self.scheduler.step).parameters.keys())
@@ -693,8 +684,8 @@ class StableUnCLIPPipeline(
             num_images_per_prompt (`int`, *optional*, defaults to 1):
                 The number of images to generate per prompt.
             eta (`float`, *optional*, defaults to 0.0):
-                Corresponds to parameter eta (η) from the [DDIM](https://huggingface.co/papers/2010.02502) paper. Only
-                applies to the [`~schedulers.DDIMScheduler`], and is ignored in other schedulers.
+                Corresponds to parameter eta (η) from the [DDIM](https://arxiv.org/abs/2010.02502) paper. Only applies
+                to the [`~schedulers.DDIMScheduler`], and is ignored in other schedulers.
             generator (`torch.Generator` or `List[torch.Generator]`, *optional*):
                 A [`torch.Generator`](https://pytorch.org/docs/stable/generated/torch.Generator.html) to make
                 generation deterministic.
@@ -774,7 +765,7 @@ class StableUnCLIPPipeline(
         device = self._execution_device
 
         # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
-        # of the Imagen paper: https://huggingface.co/papers/2205.11487 . `guidance_scale = 1`
+        # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
         # corresponds to doing no classifier free guidance.
         prior_do_classifier_free_guidance = prior_guidance_scale > 1.0
 
@@ -842,7 +833,7 @@ class StableUnCLIPPipeline(
         # done prior
 
         # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
-        # of the Imagen paper: https://huggingface.co/papers/2205.11487 . `guidance_scale = 1`
+        # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
         # corresponds to doing no classifier free guidance.
         do_classifier_free_guidance = guidance_scale > 1.0
 
@@ -932,9 +923,6 @@ class StableUnCLIPPipeline(
             if callback is not None and i % callback_steps == 0:
                 step_idx = i // getattr(self.scheduler, "order", 1)
                 callback(step_idx, t, latents)
-
-            if XLA_AVAILABLE:
-                xm.mark_step()
 
         if not output_type == "latent":
             image = self.vae.decode(latents / self.vae.config.scaling_factor, return_dict=False)[0]

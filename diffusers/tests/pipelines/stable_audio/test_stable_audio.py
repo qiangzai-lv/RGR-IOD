@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 HuggingFace Inc.
+# Copyright 2024 HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -32,14 +32,7 @@ from diffusers import (
     StableAudioProjectionModel,
 )
 from diffusers.utils import is_xformers_available
-from diffusers.utils.testing_utils import (
-    Expectations,
-    backend_empty_cache,
-    enable_full_determinism,
-    nightly,
-    require_torch_accelerator,
-    torch_device,
-)
+from diffusers.utils.testing_utils import enable_full_determinism, nightly, require_torch_gpu, torch_device
 
 from ..pipeline_params import TEXT_TO_AUDIO_BATCH_PARAMS
 from ..test_pipelines_common import PipelineTesterMixin
@@ -77,7 +70,6 @@ class StableAudioPipelineFastTests(PipelineTesterMixin, unittest.TestCase):
     )
     # There is not xformers version of the StableAudioPipeline custom attention processor
     test_xformers_attention = False
-    supports_dduf = False
 
     def get_dummy_components(self):
         torch.manual_seed(0)
@@ -420,23 +412,19 @@ class StableAudioPipelineFastTests(PipelineTesterMixin, unittest.TestCase):
     def test_sequential_offload_forward_pass_twice(self):
         pass
 
-    @unittest.skip("Test not supported because `rotary_embed_dim` doesn't have any sensible default.")
-    def test_encode_prompt_works_in_isolation(self):
-        pass
-
 
 @nightly
-@require_torch_accelerator
+@require_torch_gpu
 class StableAudioPipelineIntegrationTests(unittest.TestCase):
     def setUp(self):
         super().setUp()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def tearDown(self):
         super().tearDown()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def get_inputs(self, device, generator_device="cpu", dtype=torch.float32, seed=0):
         generator = torch.Generator(device=generator_device).manual_seed(seed)
@@ -466,15 +454,9 @@ class StableAudioPipelineIntegrationTests(unittest.TestCase):
         # check the portion of the generated audio with the largest dynamic range (reduces flakiness)
         audio_slice = audio[0, 447590:447600]
         # fmt: off
-        expected_slices = Expectations(
-            {
-                ("xpu", 3): np.array([-0.0285, 0.1083, 0.1863, 0.3165, 0.5312, 0.6971, 0.6958, 0.6177, 0.5598, 0.5048]),
-                ("cuda", 7): np.array([-0.0278, 0.1096, 0.1877, 0.3178, 0.5329, 0.6990, 0.6972, 0.6186, 0.5608, 0.5060]),
-                ("cuda", 8): np.array([-0.0285, 0.1082, 0.1862, 0.3163, 0.5306, 0.6964, 0.6953, 0.6172, 0.5593, 0.5044]),
-            }
+        expected_slice = np.array(
+            [-0.0278,  0.1096,  0.1877,  0.3178,  0.5329,  0.6990,  0.6972,  0.6186, 0.5608,  0.5060]
         )
-        # fmt: on
-
-        expected_slice = expected_slices.get_expectation()
+         # fmt: one
         max_diff = np.abs(expected_slice - audio_slice.detach().cpu().numpy()).max()
         assert max_diff < 1.5e-3

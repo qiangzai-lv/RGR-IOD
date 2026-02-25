@@ -1,4 +1,4 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
+# Copyright 2024 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -70,8 +70,6 @@ class UNet1DModel(ModelMixin, ConfigMixin):
         downsample_each_block (`int`, *optional*, defaults to `False`):
             Experimental feature for using a UNet without upsampling.
     """
-
-    _skip_layerwise_casting_patterns = ["norm"]
 
     @register_to_config
     def __init__(
@@ -225,7 +223,7 @@ class UNet1DModel(ModelMixin, ConfigMixin):
 
         timestep_embed = self.time_proj(timesteps)
         if self.config.use_timestep_embedding:
-            timestep_embed = self.time_mlp(timestep_embed.to(sample.dtype))
+            timestep_embed = self.time_mlp(timestep_embed)
         else:
             timestep_embed = timestep_embed[..., None]
             timestep_embed = timestep_embed.repeat([1, 1, sample.shape[2]]).to(sample.dtype)

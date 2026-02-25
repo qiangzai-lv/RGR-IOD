@@ -1,4 +1,4 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
+# Copyright 2024 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -46,23 +46,13 @@ from ...utils import (
     unscale_lora_layers,
 )
 from ...utils.torch_utils import is_compiled_module, is_torch_version, randn_tensor
-from ..pipeline_utils import DeprecatedPipelineMixin, DiffusionPipeline
+from ..pipeline_utils import DiffusionPipeline
 from ..stable_diffusion_xl.pipeline_output import StableDiffusionXLPipelineOutput
 
 
 if is_invisible_watermark_available():
     from ..stable_diffusion_xl.watermark import StableDiffusionXLWatermarker
 
-
-from ...utils import is_torch_xla_available
-
-
-if is_torch_xla_available():
-    import torch_xla.core.xla_model as xm
-
-    XLA_AVAILABLE = True
-else:
-    XLA_AVAILABLE = False
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -114,7 +104,6 @@ EXAMPLE_DOC_STRING = """
 
 
 class StableDiffusionXLControlNetXSPipeline(
-    DeprecatedPipelineMixin,
     DiffusionPipeline,
     TextualInversionLoaderMixin,
     StableDiffusionXLLoraLoaderMixin,
@@ -159,7 +148,6 @@ class StableDiffusionXLControlNetXSPipeline(
             watermarker is used.
     """
 
-    _last_supported_version = "0.33.1"
     model_cpu_offload_seq = "text_encoder->text_encoder_2->unet->vae"
     _optional_components = [
         "tokenizer",
@@ -208,7 +196,7 @@ class StableDiffusionXLControlNetXSPipeline(
             scheduler=scheduler,
             feature_extractor=feature_extractor,
         )
-        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1) if getattr(self, "vae", None) else 8
+        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor, do_convert_rgb=True)
         self.control_image_processor = VaeImageProcessor(
             vae_scale_factor=self.vae_scale_factor, do_convert_rgb=True, do_normalize=False
@@ -348,9 +336,7 @@ class StableDiffusionXLControlNetXSPipeline(
                 prompt_embeds = text_encoder(text_input_ids.to(device), output_hidden_states=True)
 
                 # We are only ALWAYS interested in the pooled output of the final text encoder
-                if pooled_prompt_embeds is None and prompt_embeds[0].ndim == 2:
-                    pooled_prompt_embeds = prompt_embeds[0]
-
+                pooled_prompt_embeds = prompt_embeds[0]
                 if clip_skip is None:
                     prompt_embeds = prompt_embeds.hidden_states[-2]
                 else:
@@ -409,10 +395,8 @@ class StableDiffusionXLControlNetXSPipeline(
                     uncond_input.input_ids.to(device),
                     output_hidden_states=True,
                 )
-
                 # We are only ALWAYS interested in the pooled output of the final text encoder
-                if negative_pooled_prompt_embeds is None and negative_prompt_embeds[0].ndim == 2:
-                    negative_pooled_prompt_embeds = negative_prompt_embeds[0]
+                negative_pooled_prompt_embeds = negative_prompt_embeds[0]
                 negative_prompt_embeds = negative_prompt_embeds.hidden_states[-2]
 
                 negative_prompt_embeds_list.append(negative_prompt_embeds)
@@ -465,7 +449,7 @@ class StableDiffusionXLControlNetXSPipeline(
     def prepare_extra_step_kwargs(self, generator, eta):
         # prepare extra kwargs for the scheduler step, since not all schedulers have the same signature
         # eta (η) is only used with the DDIMScheduler, it will be ignored for other schedulers.
-        # eta corresponds to η in DDIM paper: https://huggingface.co/papers/2010.02502
+        # eta corresponds to η in DDIM paper: https://arxiv.org/abs/2010.02502
         # and should be between [0, 1]
 
         accepts_eta = "eta" in set(inspect.signature(self.scheduler.step).parameters.keys())
@@ -805,8 +789,8 @@ class StableDiffusionXLControlNetXSPipeline(
             num_images_per_prompt (`int`, *optional*, defaults to 1):
                 The number of images to generate per prompt.
             eta (`float`, *optional*, defaults to 0.0):
-                Corresponds to parameter eta (η) from the [DDIM](https://huggingface.co/papers/2010.02502) paper. Only
-                applies to the [`~schedulers.DDIMScheduler`], and is ignored in other schedulers.
+                Corresponds to parameter eta (η) from the [DDIM](https://arxiv.org/abs/2010.02502) paper. Only applies
+                to the [`~schedulers.DDIMScheduler`], and is ignored in other schedulers.
             generator (`torch.Generator` or `List[torch.Generator]`, *optional*):
                 A [`torch.Generator`](https://pytorch.org/docs/stable/generated/torch.Generator.html) to make
                 generation deterministic.
@@ -882,7 +866,7 @@ class StableDiffusionXLControlNetXSPipeline(
             callback_on_step_end_tensor_inputs (`List`, *optional*):
                 The list of tensor inputs for the `callback_on_step_end` function. The tensors specified in the list
                 will be passed as `callback_kwargs` argument. You will only be able to include variables listed in the
-                `._callback_tensor_inputs` attribute of your pipeline class.
+                `._callback_tensor_inputs` attribute of your pipeine class.
 
         Examples:
 
@@ -929,7 +913,7 @@ class StableDiffusionXLControlNetXSPipeline(
 
         device = self._execution_device
         # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
-        # of the Imagen paper: https://huggingface.co/papers/2205.11487 . `guidance_scale = 1`
+        # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
         # corresponds to doing no classifier free guidance.
         do_classifier_free_guidance = guidance_scale > 1.0
 
@@ -1089,9 +1073,6 @@ class StableDiffusionXLControlNetXSPipeline(
                 # call the callback, if provided
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
                     progress_bar.update()
-
-                if XLA_AVAILABLE:
-                    xm.mark_step()
 
         # manually for max memory savings
         if self.vae.dtype == torch.float16 and self.vae.config.force_upcast:

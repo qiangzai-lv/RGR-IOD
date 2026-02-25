@@ -1,4 +1,4 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
+# Copyright 2024 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -26,30 +26,23 @@ from transformers import CLIPImageProcessor, CLIPTextModel, CLIPTokenizer, CLIPV
 from ...callbacks import MultiPipelineCallbacks, PipelineCallback
 from ...image_processor import PipelineImageInput, VaeImageProcessor
 from ...loaders import FromSingleFileMixin, IPAdapterMixin, StableDiffusionLoraLoaderMixin, TextualInversionLoaderMixin
-from ...models import AutoencoderKL, ControlNetModel, ImageProjection, MultiControlNetModel, UNet2DConditionModel
+from ...models import AutoencoderKL, ControlNetModel, ImageProjection, UNet2DConditionModel
 from ...models.lora import adjust_lora_scale_text_encoder
 from ...schedulers import KarrasDiffusionSchedulers
 from ...utils import (
     USE_PEFT_BACKEND,
     deprecate,
-    is_torch_xla_available,
     logging,
     replace_example_docstring,
     scale_lora_layers,
     unscale_lora_layers,
 )
-from ...utils.torch_utils import empty_device_cache, is_compiled_module, randn_tensor
+from ...utils.torch_utils import is_compiled_module, randn_tensor
 from ..pipeline_utils import DiffusionPipeline, StableDiffusionMixin
 from ..stable_diffusion import StableDiffusionPipelineOutput
 from ..stable_diffusion.safety_checker import StableDiffusionSafetyChecker
+from .multicontrolnet import MultiControlNetModel
 
-
-if is_torch_xla_available():
-    import torch_xla.core.xla_model as xm
-
-    XLA_AVAILABLE = True
-else:
-    XLA_AVAILABLE = False
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -91,7 +84,7 @@ EXAMPLE_DOC_STRING = """
         ...     "lllyasviel/control_v11p_sd15_inpaint", torch_dtype=torch.float16
         ... )
         >>> pipe = StableDiffusionControlNetInpaintPipeline.from_pretrained(
-        ...     "stable-diffusion-v1-5/stable-diffusion-v1-5", controlnet=controlnet, torch_dtype=torch.float16
+        ...     "runwayml/stable-diffusion-v1-5", controlnet=controlnet, torch_dtype=torch.float16
         ... )
 
         >>> pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
@@ -149,11 +142,11 @@ class StableDiffusionControlNetInpaintPipeline(
     <Tip>
 
     This pipeline can be used with checkpoints that have been specifically fine-tuned for inpainting
-    ([stable-diffusion-v1-5/stable-diffusion-inpainting](https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-inpainting))
-    as well as default text-to-image Stable Diffusion checkpoints
-    ([stable-diffusion-v1-5/stable-diffusion-v1-5](https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5)).
-    Default text-to-image Stable Diffusion checkpoints might be preferable for ControlNets that have been fine-tuned on
-    those, such as [lllyasviel/control_v11p_sd15_inpaint](https://huggingface.co/lllyasviel/control_v11p_sd15_inpaint).
+    ([runwayml/stable-diffusion-inpainting](https://huggingface.co/runwayml/stable-diffusion-inpainting)) as well as
+    default text-to-image Stable Diffusion checkpoints
+    ([runwayml/stable-diffusion-v1-5](https://huggingface.co/runwayml/stable-diffusion-v1-5)). Default text-to-image
+    Stable Diffusion checkpoints might be preferable for ControlNets that have been fine-tuned on those, such as
+    [lllyasviel/control_v11p_sd15_inpaint](https://huggingface.co/lllyasviel/control_v11p_sd15_inpaint).
 
     </Tip>
 
@@ -175,8 +168,8 @@ class StableDiffusionControlNetInpaintPipeline(
             [`DDIMScheduler`], [`LMSDiscreteScheduler`], or [`PNDMScheduler`].
         safety_checker ([`StableDiffusionSafetyChecker`]):
             Classification module that estimates whether generated images could be considered offensive or harmful.
-            Please refer to the [model card](https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5) for
-            more details about a model's potential harms.
+            Please refer to the [model card](https://huggingface.co/runwayml/stable-diffusion-v1-5) for more details
+            about a model's potential harms.
         feature_extractor ([`~transformers.CLIPImageProcessor`]):
             A `CLIPImageProcessor` to extract features from generated images; used as inputs to the `safety_checker`.
     """
@@ -184,14 +177,7 @@ class StableDiffusionControlNetInpaintPipeline(
     model_cpu_offload_seq = "text_encoder->image_encoder->unet->vae"
     _optional_components = ["safety_checker", "feature_extractor", "image_encoder"]
     _exclude_from_cpu_offload = ["safety_checker"]
-    _callback_tensor_inputs = [
-        "latents",
-        "prompt_embeds",
-        "negative_prompt_embeds",
-        "control_image",
-        "mask",
-        "masked_image_latents",
-    ]
+    _callback_tensor_inputs = ["latents", "prompt_embeds", "negative_prompt_embeds"]
 
     def __init__(
         self,
@@ -238,7 +224,7 @@ class StableDiffusionControlNetInpaintPipeline(
             feature_extractor=feature_extractor,
             image_encoder=image_encoder,
         )
-        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1) if getattr(self, "vae", None) else 8
+        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
         self.mask_processor = VaeImageProcessor(
             vae_scale_factor=self.vae_scale_factor, do_normalize=False, do_binarize=True, do_convert_grayscale=True
@@ -566,7 +552,7 @@ class StableDiffusionControlNetInpaintPipeline(
     def prepare_extra_step_kwargs(self, generator, eta):
         # prepare extra kwargs for the scheduler step, since not all schedulers have the same signature
         # eta (η) is only used with the DDIMScheduler, it will be ignored for other schedulers.
-        # eta corresponds to η in DDIM paper: https://huggingface.co/papers/2010.02502
+        # eta corresponds to η in DDIM paper: https://arxiv.org/abs/2010.02502
         # and should be between [0, 1]
 
         accepts_eta = "eta" in set(inspect.signature(self.scheduler.step).parameters.keys())
@@ -657,7 +643,7 @@ class StableDiffusionControlNetInpaintPipeline(
         if padding_mask_crop is not None:
             if not isinstance(image, PIL.Image.Image):
                 raise ValueError(
-                    f"The image should be a PIL image when inpainting mask crop, but is of type {type(image)}."
+                    f"The image should be a PIL image when inpainting mask crop, but is of type" f" {type(image)}."
                 )
             if not isinstance(mask_image, PIL.Image.Image):
                 raise ValueError(
@@ -665,7 +651,7 @@ class StableDiffusionControlNetInpaintPipeline(
                     f" {type(mask_image)}."
                 )
             if output_type != "pil":
-                raise ValueError(f"The output type should be PIL when inpainting mask crop, but is {output_type}.")
+                raise ValueError(f"The output type should be PIL when inpainting mask crop, but is" f" {output_type}.")
 
         # `prompt` needs more sophisticated handling when there are multiple
         # conditionings.
@@ -976,7 +962,7 @@ class StableDiffusionControlNetInpaintPipeline(
         return self._clip_skip
 
     # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
-    # of the Imagen paper: https://huggingface.co/papers/2205.11487 . `guidance_scale = 1`
+    # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
     # corresponds to doing no classifier free guidance.
     @property
     def do_classifier_free_guidance(self):
@@ -989,10 +975,6 @@ class StableDiffusionControlNetInpaintPipeline(
     @property
     def num_timesteps(self):
         return self._num_timesteps
-
-    @property
-    def interrupt(self):
-        return self._interrupt
 
     @torch.no_grad()
     @replace_example_docstring(EXAMPLE_DOC_STRING)
@@ -1089,8 +1071,8 @@ class StableDiffusionControlNetInpaintPipeline(
             num_images_per_prompt (`int`, *optional*, defaults to 1):
                 The number of images to generate per prompt.
             eta (`float`, *optional*, defaults to 0.0):
-                Corresponds to parameter eta (η) from the [DDIM](https://huggingface.co/papers/2010.02502) paper. Only
-                applies to the [`~schedulers.DDIMScheduler`], and is ignored in other schedulers.
+                Corresponds to parameter eta (η) from the [DDIM](https://arxiv.org/abs/2010.02502) paper. Only applies
+                to the [`~schedulers.DDIMScheduler`], and is ignored in other schedulers.
             generator (`torch.Generator` or `List[torch.Generator]`, *optional*):
                 A [`torch.Generator`](https://pytorch.org/docs/stable/generated/torch.Generator.html) to make
                 generation deterministic.
@@ -1209,7 +1191,6 @@ class StableDiffusionControlNetInpaintPipeline(
         self._guidance_scale = guidance_scale
         self._clip_skip = clip_skip
         self._cross_attention_kwargs = cross_attention_kwargs
-        self._interrupt = False
 
         # 2. Define call parameters
         if prompt is not None and isinstance(prompt, str):
@@ -1394,9 +1375,6 @@ class StableDiffusionControlNetInpaintPipeline(
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         with self.progress_bar(total=num_inference_steps) as progress_bar:
             for i, t in enumerate(timesteps):
-                if self.interrupt:
-                    continue
-
                 # expand the latents if we are doing classifier free guidance
                 latent_model_input = torch.cat([latents] * 2) if self.do_classifier_free_guidance else latents
                 latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
@@ -1483,7 +1461,6 @@ class StableDiffusionControlNetInpaintPipeline(
                     latents = callback_outputs.pop("latents", latents)
                     prompt_embeds = callback_outputs.pop("prompt_embeds", prompt_embeds)
                     negative_prompt_embeds = callback_outputs.pop("negative_prompt_embeds", negative_prompt_embeds)
-                    control_image = callback_outputs.pop("control_image", control_image)
 
                 # call the callback, if provided
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
@@ -1492,15 +1469,12 @@ class StableDiffusionControlNetInpaintPipeline(
                         step_idx = i // getattr(self.scheduler, "order", 1)
                         callback(step_idx, t, latents)
 
-                if XLA_AVAILABLE:
-                    xm.mark_step()
-
         # If we do sequential model offloading, let's offload unet and controlnet
         # manually for max memory savings
         if hasattr(self, "final_offload_hook") and self.final_offload_hook is not None:
             self.unet.to("cpu")
             self.controlnet.to("cpu")
-            empty_device_cache()
+            torch.cuda.empty_cache()
 
         if not output_type == "latent":
             image = self.vae.decode(latents / self.vae.config.scaling_factor, return_dict=False, generator=generator)[

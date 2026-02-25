@@ -1,4 +1,4 @@
-# Copyright 2025 HuggingFace Inc.
+# Copyright 2024 HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,8 +15,8 @@
 import sys
 import unittest
 
+import numpy as np
 import torch
-from parameterized import parameterized
 from transformers import AutoTokenizer, T5EncoderModel
 
 from diffusers import (
@@ -28,14 +28,19 @@ from diffusers import (
 )
 from diffusers.utils.testing_utils import (
     floats_tensor,
+    is_peft_available,
     require_peft_backend,
-    require_torch_accelerator,
+    skip_mps,
+    torch_device,
 )
 
 
+if is_peft_available():
+    pass
+
 sys.path.append(".")
 
-from utils import PeftLoraLoaderMixinTests  # noqa: E402
+from utils import PeftLoraLoaderMixinTests, check_if_lora_correctly_set  # noqa: E402
 
 
 @require_peft_backend
@@ -120,21 +125,41 @@ class CogVideoXLoRATests(unittest.TestCase, PeftLoraLoaderMixinTests):
 
         return noise, input_ids, pipeline_inputs
 
+    @skip_mps
+    def test_lora_fuse_nan(self):
+        for scheduler_cls in self.scheduler_classes:
+            components, text_lora_config, denoiser_lora_config = self.get_dummy_components(scheduler_cls)
+            pipe = self.pipeline_class(**components)
+            pipe = pipe.to(torch_device)
+            pipe.set_progress_bar_config(disable=None)
+            _, _, inputs = self.get_dummy_inputs(with_generator=False)
+
+            pipe.transformer.add_adapter(denoiser_lora_config, "adapter-1")
+
+            self.assertTrue(check_if_lora_correctly_set(pipe.transformer), "Lora not correctly set in denoiser")
+
+            # corrupt one LoRA weight with `inf` values
+            with torch.no_grad():
+                pipe.transformer.transformer_blocks[0].attn1.to_q.lora_A["adapter-1"].weight += float("inf")
+
+            # with `safe_fusing=True` we should see an Error
+            with self.assertRaises(ValueError):
+                pipe.fuse_lora(components=self.pipeline_class._lora_loadable_modules, safe_fusing=True)
+
+            # without we should not see an error, but every image will be black
+            pipe.fuse_lora(components=self.pipeline_class._lora_loadable_modules, safe_fusing=False)
+
+            out = pipe(
+                "test", num_inference_steps=2, max_sequence_length=inputs["max_sequence_length"], output_type="np"
+            )[0]
+
+            self.assertTrue(np.isnan(out).all())
+
     def test_simple_inference_with_text_lora_denoiser_fused_multi(self):
         super().test_simple_inference_with_text_lora_denoiser_fused_multi(expected_atol=9e-3)
 
     def test_simple_inference_with_text_denoiser_lora_unfused(self):
         super().test_simple_inference_with_text_denoiser_lora_unfused(expected_atol=9e-3)
-
-    def test_lora_scale_kwargs_match_fusion(self):
-        super().test_lora_scale_kwargs_match_fusion(expected_atol=9e-3, expected_rtol=9e-3)
-
-    @parameterized.expand([("block_level", True), ("leaf_level", False)])
-    @require_torch_accelerator
-    def test_group_offloading_inference_denoiser(self, offload_type, use_stream):
-        # TODO: We don't run the (leaf_level, True) test here that is enabled for other models.
-        # The reason for this can be found here: https://github.com/huggingface/diffusers/pull/11804#issuecomment-3013325338
-        super()._test_group_offloading_inference_denoiser(offload_type, use_stream)
 
     @unittest.skip("Not supported in CogVideoX.")
     def test_simple_inference_with_text_denoiser_block_scale(self):
@@ -166,8 +191,4 @@ class CogVideoXLoRATests(unittest.TestCase, PeftLoraLoaderMixinTests):
 
     @unittest.skip("Text encoder LoRA is not supported in CogVideoX.")
     def test_simple_inference_with_text_lora_save_load(self):
-        pass
-
-    @unittest.skip("Not supported in CogVideoX.")
-    def test_simple_inference_with_text_denoiser_multi_adapter_block_lora(self):
         pass

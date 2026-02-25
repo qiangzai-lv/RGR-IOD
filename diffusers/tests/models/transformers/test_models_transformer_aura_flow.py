@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 HuggingFace Inc.
+# Copyright 2024 HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -73,10 +73,6 @@ class AuraFlowTransformerTests(ModelTesterMixin, unittest.TestCase):
         }
         inputs_dict = self.dummy_input
         return init_dict, inputs_dict
-
-    def test_gradient_checkpointing_is_applied(self):
-        expected_set = {"AuraFlowTransformer2DModel"}
-        super().test_gradient_checkpointing_is_applied(expected_set=expected_set)
 
     @unittest.skip("AuraFlowTransformer2DModel uses its own dedicated attention processor. This test does not apply")
     def test_set_attn_processor_for_determinism(self):

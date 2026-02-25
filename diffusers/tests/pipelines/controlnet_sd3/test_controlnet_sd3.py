@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 HuggingFace Inc and The InstantX Team.
+# Copyright 2024 HuggingFace Inc and The InstantX Team.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
 
 import gc
 import unittest
-from typing import Optional
 
 import numpy as np
 import torch
@@ -30,10 +29,8 @@ from diffusers import (
 from diffusers.models import SD3ControlNetModel, SD3MultiControlNetModel
 from diffusers.utils import load_image
 from diffusers.utils.testing_utils import (
-    backend_empty_cache,
     enable_full_determinism,
-    numpy_cosine_similarity_distance,
-    require_big_accelerator,
+    require_torch_gpu,
     slow,
     torch_device,
 )
@@ -59,12 +56,8 @@ class StableDiffusion3ControlNetPipelineFastTests(unittest.TestCase, PipelineTes
         ]
     )
     batch_params = frozenset(["prompt", "negative_prompt"])
-    test_layerwise_casting = True
-    test_group_offloading = True
 
-    def get_dummy_components(
-        self, num_controlnet_layers: int = 3, qk_norm: Optional[str] = "rms_norm", use_dual_attention=False
-    ):
+    def get_dummy_components(self):
         torch.manual_seed(0)
         transformer = SD3Transformer2DModel(
             sample_size=32,
@@ -77,8 +70,6 @@ class StableDiffusion3ControlNetPipelineFastTests(unittest.TestCase, PipelineTes
             caption_projection_dim=32,
             pooled_projection_dim=64,
             out_channels=8,
-            qk_norm=qk_norm,
-            dual_attention_layers=() if not use_dual_attention else (0, 1),
         )
 
         torch.manual_seed(0)
@@ -86,17 +77,14 @@ class StableDiffusion3ControlNetPipelineFastTests(unittest.TestCase, PipelineTes
             sample_size=32,
             patch_size=1,
             in_channels=8,
-            num_layers=num_controlnet_layers,
+            num_layers=1,
             attention_head_dim=8,
             num_attention_heads=4,
             joint_attention_dim=32,
             caption_projection_dim=32,
             pooled_projection_dim=64,
             out_channels=8,
-            qk_norm=qk_norm,
-            dual_attention_layers=() if not use_dual_attention else (0,),
         )
-
         clip_text_encoder_config = CLIPTextConfig(
             bos_token_id=0,
             eos_token_id=2,
@@ -152,8 +140,6 @@ class StableDiffusion3ControlNetPipelineFastTests(unittest.TestCase, PipelineTes
             "transformer": transformer,
             "vae": vae,
             "controlnet": controlnet,
-            "image_encoder": None,
-            "feature_extractor": None,
         }
 
     def get_dummy_inputs(self, device, seed=0):
@@ -183,7 +169,8 @@ class StableDiffusion3ControlNetPipelineFastTests(unittest.TestCase, PipelineTes
 
         return inputs
 
-    def run_pipe(self, components, use_sd35=False):
+    def test_controlnet_sd3(self):
+        components = self.get_dummy_components()
         sd_pipe = StableDiffusion3ControlNetPipeline(**components)
         sd_pipe = sd_pipe.to(torch_device, dtype=torch.float16)
         sd_pipe.set_progress_bar_config(disable=None)
@@ -196,22 +183,11 @@ class StableDiffusion3ControlNetPipelineFastTests(unittest.TestCase, PipelineTes
 
         assert image.shape == (1, 32, 32, 3)
 
-        if not use_sd35:
-            expected_slice = np.array([0.5767, 0.7100, 0.5981, 0.5674, 0.5952, 0.4102, 0.5093, 0.5044, 0.6030])
-        else:
-            expected_slice = np.array([1.0000, 0.9072, 0.4209, 0.2744, 0.5737, 0.3840, 0.6113, 0.6250, 0.6328])
+        expected_slice = np.array([0.5767, 0.7100, 0.5981, 0.5674, 0.5952, 0.4102, 0.5093, 0.5044, 0.6030])
 
-        assert np.abs(image_slice.flatten() - expected_slice).max() < 1e-2, (
-            f"Expected: {expected_slice}, got: {image_slice.flatten()}"
-        )
-
-    def test_controlnet_sd3(self):
-        components = self.get_dummy_components()
-        self.run_pipe(components)
-
-    def test_controlnet_sd35(self):
-        components = self.get_dummy_components(num_controlnet_layers=1, qk_norm="rms_norm", use_dual_attention=True)
-        self.run_pipe(components, use_sd35=True)
+        assert (
+            np.abs(image_slice.flatten() - expected_slice).max() < 1e-2
+        ), f"Expected: {expected_slice}, got: {image_slice.flatten()}"
 
     @unittest.skip("xFormersAttnProcessor does not work with SD3 Joint Attention")
     def test_xformers_attention_forwardGenerator_pass(self):
@@ -219,26 +195,26 @@ class StableDiffusion3ControlNetPipelineFastTests(unittest.TestCase, PipelineTes
 
 
 @slow
-@require_big_accelerator
+@require_torch_gpu
 class StableDiffusion3ControlNetPipelineSlowTests(unittest.TestCase):
     pipeline_class = StableDiffusion3ControlNetPipeline
 
     def setUp(self):
         super().setUp()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def tearDown(self):
         super().tearDown()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def test_canny(self):
         controlnet = SD3ControlNetModel.from_pretrained("InstantX/SD3-Controlnet-Canny", torch_dtype=torch.float16)
         pipe = StableDiffusion3ControlNetPipeline.from_pretrained(
             "stabilityai/stable-diffusion-3-medium-diffusers", controlnet=controlnet, torch_dtype=torch.float16
         )
-        pipe.enable_model_cpu_offload(device=torch_device)
+        pipe.enable_model_cpu_offload()
         pipe.set_progress_bar_config(disable=None)
 
         generator = torch.Generator(device="cpu").manual_seed(0)
@@ -262,16 +238,18 @@ class StableDiffusion3ControlNetPipelineSlowTests(unittest.TestCase):
 
         original_image = image[-3:, -3:, -1].flatten()
 
-        expected_image = np.array([0.7314, 0.7075, 0.6611, 0.7539, 0.7563, 0.6650, 0.6123, 0.7275, 0.7222])
+        expected_image = np.array(
+            [0.20947266, 0.1574707, 0.19897461, 0.15063477, 0.1418457, 0.17285156, 0.14160156, 0.13989258, 0.30810547]
+        )
 
-        assert numpy_cosine_similarity_distance(original_image.flatten(), expected_image) < 1e-2
+        assert np.abs(original_image.flatten() - expected_image).max() < 1e-2
 
     def test_pose(self):
         controlnet = SD3ControlNetModel.from_pretrained("InstantX/SD3-Controlnet-Pose", torch_dtype=torch.float16)
         pipe = StableDiffusion3ControlNetPipeline.from_pretrained(
             "stabilityai/stable-diffusion-3-medium-diffusers", controlnet=controlnet, torch_dtype=torch.float16
         )
-        pipe.enable_model_cpu_offload(device=torch_device)
+        pipe.enable_model_cpu_offload()
         pipe.set_progress_bar_config(disable=None)
 
         generator = torch.Generator(device="cpu").manual_seed(0)
@@ -294,16 +272,19 @@ class StableDiffusion3ControlNetPipelineSlowTests(unittest.TestCase):
         assert image.shape == (1024, 1024, 3)
 
         original_image = image[-3:, -3:, -1].flatten()
-        expected_image = np.array([0.9048, 0.8740, 0.8936, 0.8516, 0.8799, 0.9360, 0.8379, 0.8408, 0.8652])
 
-        assert numpy_cosine_similarity_distance(original_image.flatten(), expected_image) < 1e-2
+        expected_image = np.array(
+            [0.8671875, 0.86621094, 0.91015625, 0.8491211, 0.87890625, 0.9140625, 0.8300781, 0.8334961, 0.8623047]
+        )
+
+        assert np.abs(original_image.flatten() - expected_image).max() < 1e-2
 
     def test_tile(self):
-        controlnet = SD3ControlNetModel.from_pretrained("InstantX/SD3-Controlnet-Tile", torch_dtype=torch.float16)
+        controlnet = SD3ControlNetModel.from_pretrained("InstantX//SD3-Controlnet-Tile", torch_dtype=torch.float16)
         pipe = StableDiffusion3ControlNetPipeline.from_pretrained(
             "stabilityai/stable-diffusion-3-medium-diffusers", controlnet=controlnet, torch_dtype=torch.float16
         )
-        pipe.enable_model_cpu_offload(device=torch_device)
+        pipe.enable_model_cpu_offload()
         pipe.set_progress_bar_config(disable=None)
 
         generator = torch.Generator(device="cpu").manual_seed(0)
@@ -326,9 +307,12 @@ class StableDiffusion3ControlNetPipelineSlowTests(unittest.TestCase):
         assert image.shape == (1024, 1024, 3)
 
         original_image = image[-3:, -3:, -1].flatten()
-        expected_image = np.array([0.6699, 0.6836, 0.6226, 0.6572, 0.7310, 0.6646, 0.6650, 0.6694, 0.6011])
 
-        assert numpy_cosine_similarity_distance(original_image.flatten(), expected_image) < 1e-2
+        expected_image = np.array(
+            [0.6982422, 0.7011719, 0.65771484, 0.6904297, 0.7416992, 0.6904297, 0.6977539, 0.7080078, 0.6386719]
+        )
+
+        assert np.abs(original_image.flatten() - expected_image).max() < 1e-2
 
     def test_multi_controlnet(self):
         controlnet = SD3ControlNetModel.from_pretrained("InstantX/SD3-Controlnet-Canny", torch_dtype=torch.float16)
@@ -337,7 +321,7 @@ class StableDiffusion3ControlNetPipelineSlowTests(unittest.TestCase):
         pipe = StableDiffusion3ControlNetPipeline.from_pretrained(
             "stabilityai/stable-diffusion-3-medium-diffusers", controlnet=controlnet, torch_dtype=torch.float16
         )
-        pipe.enable_model_cpu_offload(device=torch_device)
+        pipe.enable_model_cpu_offload()
         pipe.set_progress_bar_config(disable=None)
 
         generator = torch.Generator(device="cpu").manual_seed(0)
@@ -360,6 +344,8 @@ class StableDiffusion3ControlNetPipelineSlowTests(unittest.TestCase):
         assert image.shape == (1024, 1024, 3)
 
         original_image = image[-3:, -3:, -1].flatten()
-        expected_image = np.array([0.7207, 0.7041, 0.6543, 0.7500, 0.7490, 0.6592, 0.6001, 0.7168, 0.7231])
+        expected_image = np.array(
+            [0.7451172, 0.7416992, 0.7158203, 0.7792969, 0.7607422, 0.7089844, 0.6855469, 0.71777344, 0.7314453]
+        )
 
-        assert numpy_cosine_similarity_distance(original_image.flatten(), expected_image) < 1e-2
+        assert np.abs(original_image.flatten() - expected_image).max() < 1e-2

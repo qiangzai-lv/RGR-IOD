@@ -12,9 +12,9 @@ from transformers import (
 )
 
 from ...image_processor import PipelineImageInput, VaeImageProcessor
-from ...loaders import FluxLoraLoaderMixin, FromSingleFileMixin, TextualInversionLoaderMixin
+from ...loaders import FluxLoraLoaderMixin, FromSingleFileMixin
 from ...models.autoencoders import AutoencoderKL
-from ...models.controlnets.controlnet_flux import FluxControlNetModel, FluxMultiControlNetModel
+from ...models.controlnet_flux import FluxControlNetModel, FluxMultiControlNetModel
 from ...models.transformers import FluxTransformer2DModel
 from ...schedulers import FlowMatchEulerDiscreteScheduler
 from ...utils import (
@@ -71,8 +71,6 @@ EXAMPLE_DOC_STRING = """
         ...     image=init_image,
         ...     mask_image=mask_image,
         ...     control_image=control_image,
-        ...     control_guidance_start=0.2,
-        ...     control_guidance_end=0.8,
         ...     controlnet_conditioning_scale=0.7,
         ...     strength=0.7,
         ...     num_inference_steps=28,
@@ -89,7 +87,7 @@ def calculate_shift(
     base_seq_len: int = 256,
     max_seq_len: int = 4096,
     base_shift: float = 0.5,
-    max_shift: float = 1.15,
+    max_shift: float = 1.16,
 ):
     m = (max_shift - base_shift) / (max_seq_len - base_seq_len)
     b = base_shift - m * base_seq_len
@@ -120,7 +118,7 @@ def retrieve_timesteps(
     sigmas: Optional[List[float]] = None,
     **kwargs,
 ):
-    r"""
+    """
     Calls the scheduler's `set_timesteps` method and retrieves timesteps from the scheduler after the call. Handles
     custom timesteps. Any kwargs will be supplied to `scheduler.set_timesteps`.
 
@@ -200,7 +198,7 @@ class FluxControlNetInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, From
 
     model_cpu_offload_seq = "text_encoder->text_encoder_2->transformer->vae"
     _optional_components = []
-    _callback_tensor_inputs = ["latents", "prompt_embeds", "control_image", "mask", "masked_image_latents"]
+    _callback_tensor_inputs = ["latents", "prompt_embeds"]
 
     def __init__(
         self,
@@ -216,8 +214,6 @@ class FluxControlNetInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, From
         ],
     ):
         super().__init__()
-        if isinstance(controlnet, (list, tuple)):
-            controlnet = FluxMultiControlNetModel(controlnet)
 
         self.register_modules(
             scheduler=scheduler,
@@ -230,14 +226,13 @@ class FluxControlNetInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, From
             controlnet=controlnet,
         )
 
-        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1) if getattr(self, "vae", None) else 8
-        # Flux latents are turned into 2x2 patches and packed. This means the latent width and height has to be divisible
-        # by the patch size. So the vae scale factor is multiplied by the patch size to account for this
-        self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor * 2)
-        latent_channels = self.vae.config.latent_channels if getattr(self, "vae", None) else 16
+        self.vae_scale_factor = (
+            2 ** (len(self.vae.config.block_out_channels)) if hasattr(self, "vae") and self.vae is not None else 16
+        )
+        self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
         self.mask_processor = VaeImageProcessor(
-            vae_scale_factor=self.vae_scale_factor * 2,
-            vae_latent_channels=latent_channels,
+            vae_scale_factor=self.vae_scale_factor,
+            vae_latent_channels=self.vae.config.latent_channels,
             do_normalize=False,
             do_binarize=True,
             do_convert_grayscale=True,
@@ -245,7 +240,7 @@ class FluxControlNetInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, From
         self.tokenizer_max_length = (
             self.tokenizer.model_max_length if hasattr(self, "tokenizer") and self.tokenizer is not None else 77
         )
-        self.default_sample_size = 128
+        self.default_sample_size = 64
 
     # Copied from diffusers.pipelines.flux.pipeline_flux.FluxPipeline._get_t5_prompt_embeds
     def _get_t5_prompt_embeds(
@@ -261,9 +256,6 @@ class FluxControlNetInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, From
 
         prompt = [prompt] if isinstance(prompt, str) else prompt
         batch_size = len(prompt)
-
-        if isinstance(self, TextualInversionLoaderMixin):
-            prompt = self.maybe_convert_prompt(prompt, self.tokenizer_2)
 
         text_inputs = self.tokenizer_2(
             prompt,
@@ -309,9 +301,6 @@ class FluxControlNetInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, From
         prompt = [prompt] if isinstance(prompt, str) else prompt
         batch_size = len(prompt)
 
-        if isinstance(self, TextualInversionLoaderMixin):
-            prompt = self.maybe_convert_prompt(prompt, self.tokenizer)
-
         text_inputs = self.tokenizer(
             prompt,
             padding="max_length",
@@ -346,7 +335,7 @@ class FluxControlNetInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, From
     def encode_prompt(
         self,
         prompt: Union[str, List[str]],
-        prompt_2: Optional[Union[str, List[str]]] = None,
+        prompt_2: Union[str, List[str]],
         device: Optional[torch.device] = None,
         num_images_per_prompt: int = 1,
         prompt_embeds: Optional[torch.FloatTensor] = None,
@@ -468,10 +457,8 @@ class FluxControlNetInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, From
         if strength < 0 or strength > 1:
             raise ValueError(f"The value of strength should in [0.0, 1.0] but is {strength}")
 
-        if height % (self.vae_scale_factor * 2) != 0 or width % (self.vae_scale_factor * 2) != 0:
-            logger.warning(
-                f"`height` and `width` have to be divisible by {self.vae_scale_factor * 2} but are {height} and {width}. Dimensions will be resized accordingly"
-            )
+        if height % 8 != 0 or width % 8 != 0:
+            raise ValueError(f"`height` and `width` have to be divisible by 8 but are {height} and {width}.")
 
         if callback_on_step_end_tensor_inputs is not None and not all(
             k in self._callback_tensor_inputs for k in callback_on_step_end_tensor_inputs
@@ -507,7 +494,7 @@ class FluxControlNetInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, From
         if padding_mask_crop is not None:
             if not isinstance(image, PIL.Image.Image):
                 raise ValueError(
-                    f"The image should be a PIL image when inpainting mask crop, but is of type {type(image)}."
+                    f"The image should be a PIL image when inpainting mask crop, but is of type" f" {type(image)}."
                 )
             if not isinstance(mask_image, PIL.Image.Image):
                 raise ValueError(
@@ -515,7 +502,7 @@ class FluxControlNetInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, From
                     f" {type(mask_image)}."
                 )
             if output_type != "pil":
-                raise ValueError(f"The output type should be PIL when inpainting mask crop, but is {output_type}.")
+                raise ValueError(f"The output type should be PIL when inpainting mask crop, but is" f" {output_type}.")
 
         if max_sequence_length is not None and max_sequence_length > 512:
             raise ValueError(f"`max_sequence_length` cannot be greater than 512 but is {max_sequence_length}")
@@ -523,9 +510,9 @@ class FluxControlNetInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, From
     @staticmethod
     # Copied from diffusers.pipelines.flux.pipeline_flux.FluxPipeline._prepare_latent_image_ids
     def _prepare_latent_image_ids(batch_size, height, width, device, dtype):
-        latent_image_ids = torch.zeros(height, width, 3)
-        latent_image_ids[..., 1] = latent_image_ids[..., 1] + torch.arange(height)[:, None]
-        latent_image_ids[..., 2] = latent_image_ids[..., 2] + torch.arange(width)[None, :]
+        latent_image_ids = torch.zeros(height // 2, width // 2, 3)
+        latent_image_ids[..., 1] = latent_image_ids[..., 1] + torch.arange(height // 2)[:, None]
+        latent_image_ids[..., 2] = latent_image_ids[..., 2] + torch.arange(width // 2)[None, :]
 
         latent_image_id_height, latent_image_id_width, latent_image_id_channels = latent_image_ids.shape
 
@@ -549,18 +536,17 @@ class FluxControlNetInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, From
     def _unpack_latents(latents, height, width, vae_scale_factor):
         batch_size, num_patches, channels = latents.shape
 
-        # VAE applies 8x compression on images but we must also account for packing which requires
-        # latent height and width to be divisible by 2.
-        height = 2 * (int(height) // (vae_scale_factor * 2))
-        width = 2 * (int(width) // (vae_scale_factor * 2))
+        height = height // vae_scale_factor
+        width = width // vae_scale_factor
 
-        latents = latents.view(batch_size, height // 2, width // 2, channels // 4, 2, 2)
+        latents = latents.view(batch_size, height, width, channels // 4, 2, 2)
         latents = latents.permute(0, 3, 1, 4, 2, 5)
 
-        latents = latents.reshape(batch_size, channels // (2 * 2), height, width)
+        latents = latents.reshape(batch_size, channels // (2 * 2), height * 2, width * 2)
 
         return latents
 
+    # Copied from diffusers.pipelines.flux.pipeline_flux_inpaint.FluxInpaintPipeline.prepare_latents
     def prepare_latents(
         self,
         image,
@@ -580,12 +566,11 @@ class FluxControlNetInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, From
                 f" size of {batch_size}. Make sure the batch size matches the length of the generators."
             )
 
-        # VAE applies 8x compression on images but we must also account for packing which requires
-        # latent height and width to be divisible by 2.
-        height = 2 * (int(height) // (self.vae_scale_factor * 2))
-        width = 2 * (int(width) // (self.vae_scale_factor * 2))
+        height = 2 * (int(height) // self.vae_scale_factor)
+        width = 2 * (int(width) // self.vae_scale_factor)
+
         shape = (batch_size, num_channels_latents, height, width)
-        latent_image_ids = self._prepare_latent_image_ids(batch_size, height // 2, width // 2, device, dtype)
+        latent_image_ids = self._prepare_latent_image_ids(batch_size, height, width, device, dtype)
 
         image = image.to(device=device, dtype=dtype)
         image_latents = self._encode_vae_image(image=image, generator=generator)
@@ -613,6 +598,7 @@ class FluxControlNetInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, From
         latents = self._pack_latents(latents, batch_size, num_channels_latents, height, width)
         return latents, noise, image_latents, latent_image_ids
 
+    # Copied from diffusers.pipelines.flux.pipeline_flux_inpaint.FluxInpaintPipeline.prepare_mask_latents
     def prepare_mask_latents(
         self,
         mask,
@@ -626,10 +612,8 @@ class FluxControlNetInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, From
         device,
         generator,
     ):
-        # VAE applies 8x compression on images but we must also account for packing which requires
-        # latent height and width to be divisible by 2.
-        height = 2 * (int(height) // (self.vae_scale_factor * 2))
-        width = 2 * (int(width) // (self.vae_scale_factor * 2))
+        height = 2 * (int(height) // self.vae_scale_factor)
+        width = 2 * (int(width) // self.vae_scale_factor)
         # resize the mask to latents shape as we concatenate the mask to the latents
         # we do that before converting to dtype to avoid breaking in case we're using cpu_offload
         # and half precision
@@ -667,6 +651,7 @@ class FluxControlNetInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, From
 
         # aligning device to prevent device errors when concating it with the latent model input
         masked_image_latents = masked_image_latents.to(device=device, dtype=dtype)
+
         masked_image_latents = self._pack_latents(
             masked_image_latents,
             batch_size,
@@ -749,11 +734,9 @@ class FluxControlNetInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, From
         width: Optional[int] = None,
         strength: float = 0.6,
         padding_mask_crop: Optional[int] = None,
-        sigmas: Optional[List[float]] = None,
+        timesteps: List[int] = None,
         num_inference_steps: int = 28,
         guidance_scale: float = 7.0,
-        control_guidance_start: Union[float, List[float]] = 0.0,
-        control_guidance_end: Union[float, List[float]] = 1.0,
         control_mode: Optional[Union[int, List[int]]] = None,
         controlnet_conditioning_scale: Union[float, List[float]] = 1.0,
         num_images_per_prompt: Optional[int] = 1,
@@ -796,17 +779,10 @@ class FluxControlNetInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, From
             num_inference_steps (`int`, *optional*, defaults to 28):
                 The number of denoising steps. More denoising steps usually lead to a higher quality image at the
                 expense of slower inference.
-            sigmas (`List[float]`, *optional*):
-                Custom sigmas to use for the denoising process with schedulers which support a `sigmas` argument in
-                their `set_timesteps` method. If not defined, the default behavior when `num_inference_steps` is passed
-                will be used.
+            timesteps (`List[int]`, *optional*):
+                Custom timesteps to use for the denoising process.
             guidance_scale (`float`, *optional*, defaults to 7.0):
-                Guidance scale as defined in [Classifier-Free Diffusion
-                Guidance](https://huggingface.co/papers/2207.12598).
-            control_guidance_start (`float` or `List[float]`, *optional*, defaults to 0.0):
-                The percentage of total steps at which the ControlNet starts applying.
-            control_guidance_end (`float` or `List[float]`, *optional*, defaults to 1.0):
-                The percentage of total steps at which the ControlNet stops applying.
+                Guidance scale as defined in [Classifier-Free Diffusion Guidance](https://arxiv.org/abs/2207.12598).
             control_mode (`int` or `List[int]`, *optional*):
                 The mode for the ControlNet. If multiple ControlNets are used, this should be a list.
             controlnet_conditioning_scale (`float` or `List[float]`, *optional*, defaults to 1.0):
@@ -849,17 +825,6 @@ class FluxControlNetInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, From
 
         global_height = height
         global_width = width
-
-        if not isinstance(control_guidance_start, list) and isinstance(control_guidance_end, list):
-            control_guidance_start = len(control_guidance_end) * [control_guidance_start]
-        elif not isinstance(control_guidance_end, list) and isinstance(control_guidance_start, list):
-            control_guidance_end = len(control_guidance_start) * [control_guidance_end]
-        elif not isinstance(control_guidance_start, list) and not isinstance(control_guidance_end, list):
-            mult = len(self.controlnet.nets) if isinstance(self.controlnet, FluxMultiControlNetModel) else 1
-            control_guidance_start, control_guidance_end = (
-                mult * [control_guidance_start],
-                mult * [control_guidance_end],
-            )
 
         # 1. Check inputs
         self.check_inputs(
@@ -929,8 +894,8 @@ class FluxControlNetInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, From
         if isinstance(self.controlnet, FluxControlNetModel):
             control_image = self.prepare_image(
                 image=control_image,
-                width=width,
-                height=height,
+                width=height,
+                height=width,
                 batch_size=batch_size * num_images_per_prompt,
                 num_images_per_prompt=num_images_per_prompt,
                 device=device,
@@ -938,22 +903,19 @@ class FluxControlNetInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, From
             )
             height, width = control_image.shape[-2:]
 
-            # xlab controlnet has a input_hint_block and instantx controlnet does not
-            controlnet_blocks_repeat = False if self.controlnet.input_hint_block is None else True
-            if self.controlnet.input_hint_block is None:
-                # vae encode
-                control_image = retrieve_latents(self.vae.encode(control_image), generator=generator)
-                control_image = (control_image - self.vae.config.shift_factor) * self.vae.config.scaling_factor
+            # vae encode
+            control_image = self.vae.encode(control_image).latent_dist.sample()
+            control_image = (control_image - self.vae.config.shift_factor) * self.vae.config.scaling_factor
 
-                # pack
-                height_control_image, width_control_image = control_image.shape[2:]
-                control_image = self._pack_latents(
-                    control_image,
-                    batch_size * num_images_per_prompt,
-                    num_channels_latents,
-                    height_control_image,
-                    width_control_image,
-                )
+            # pack
+            height_control_image, width_control_image = control_image.shape[2:]
+            control_image = self._pack_latents(
+                control_image,
+                batch_size * num_images_per_prompt,
+                num_channels_latents,
+                height_control_image,
+                width_control_image,
+            )
 
             # set control mode
             if control_mode is not None:
@@ -963,9 +925,7 @@ class FluxControlNetInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, From
         elif isinstance(self.controlnet, FluxMultiControlNetModel):
             control_images = []
 
-            # xlab controlnet has a input_hint_block and instantx controlnet does not
-            controlnet_blocks_repeat = False if self.controlnet.nets[0].input_hint_block is None else True
-            for i, control_image_ in enumerate(control_image):
+            for control_image_ in control_image:
                 control_image_ = self.prepare_image(
                     image=control_image_,
                     width=width,
@@ -977,20 +937,19 @@ class FluxControlNetInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, From
                 )
                 height, width = control_image_.shape[-2:]
 
-                if self.controlnet.nets[0].input_hint_block is None:
-                    # vae encode
-                    control_image_ = retrieve_latents(self.vae.encode(control_image_), generator=generator)
-                    control_image_ = (control_image_ - self.vae.config.shift_factor) * self.vae.config.scaling_factor
+                # vae encode
+                control_image_ = self.vae.encode(control_image_).latent_dist.sample()
+                control_image_ = (control_image_ - self.vae.config.shift_factor) * self.vae.config.scaling_factor
 
-                    # pack
-                    height_control_image, width_control_image = control_image_.shape[2:]
-                    control_image_ = self._pack_latents(
-                        control_image_,
-                        batch_size * num_images_per_prompt,
-                        num_channels_latents,
-                        height_control_image,
-                        width_control_image,
-                    )
+                # pack
+                height_control_image, width_control_image = control_image_.shape[2:]
+                control_image_ = self._pack_latents(
+                    control_image_,
+                    batch_size * num_images_per_prompt,
+                    num_channels_latents,
+                    height_control_image,
+                    width_control_image,
+                )
 
                 control_images.append(control_image_)
 
@@ -1009,22 +968,21 @@ class FluxControlNetInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, From
 
         # 6. Prepare timesteps
 
-        sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps) if sigmas is None else sigmas
-        image_seq_len = (int(global_height) // self.vae_scale_factor // 2) * (
-            int(global_width) // self.vae_scale_factor // 2
-        )
+        sigmas = np.linspace(1.0, 1 / num_inference_steps, num_inference_steps)
+        image_seq_len = (int(global_height) // self.vae_scale_factor) * (int(global_width) // self.vae_scale_factor)
         mu = calculate_shift(
             image_seq_len,
-            self.scheduler.config.get("base_image_seq_len", 256),
-            self.scheduler.config.get("max_image_seq_len", 4096),
-            self.scheduler.config.get("base_shift", 0.5),
-            self.scheduler.config.get("max_shift", 1.15),
+            self.scheduler.config.base_image_seq_len,
+            self.scheduler.config.max_image_seq_len,
+            self.scheduler.config.base_shift,
+            self.scheduler.config.max_shift,
         )
         timesteps, num_inference_steps = retrieve_timesteps(
             self.scheduler,
             num_inference_steps,
             device,
-            sigmas=sigmas,
+            timesteps,
+            sigmas,
             mu=mu,
         )
         timesteps, num_inference_steps = self.get_timesteps(num_inference_steps, strength, device)
@@ -1073,14 +1031,6 @@ class FluxControlNetInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, From
             generator,
         )
 
-        controlnet_keep = []
-        for i in range(len(timesteps)):
-            keeps = [
-                1.0 - float(i / len(timesteps) < s or (i + 1) / len(timesteps) > e)
-                for s, e in zip(control_guidance_start, control_guidance_end)
-            ]
-            controlnet_keep.append(keeps[0] if isinstance(self.controlnet, FluxControlNetModel) else keeps)
-
         # 9. Denoising loop
         num_warmup_steps = max(len(timesteps) - num_inference_steps * self.scheduler.order, 0)
         self._num_timesteps = len(timesteps)
@@ -1093,29 +1043,17 @@ class FluxControlNetInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, From
                 timestep = t.expand(latents.shape[0]).to(latents.dtype)
 
                 # predict the noise residual
-                if isinstance(self.controlnet, FluxMultiControlNetModel):
-                    use_guidance = self.controlnet.nets[0].config.guidance_embeds
-                else:
-                    use_guidance = self.controlnet.config.guidance_embeds
-                if use_guidance:
+                if self.controlnet.config.guidance_embeds:
                     guidance = torch.full([1], guidance_scale, device=device, dtype=torch.float32)
                     guidance = guidance.expand(latents.shape[0])
                 else:
                     guidance = None
 
-                if isinstance(controlnet_keep[i], list):
-                    cond_scale = [c * s for c, s in zip(controlnet_conditioning_scale, controlnet_keep[i])]
-                else:
-                    controlnet_cond_scale = controlnet_conditioning_scale
-                    if isinstance(controlnet_cond_scale, list):
-                        controlnet_cond_scale = controlnet_cond_scale[0]
-                    cond_scale = controlnet_cond_scale * controlnet_keep[i]
-
                 controlnet_block_samples, controlnet_single_block_samples = self.controlnet(
                     hidden_states=latents,
                     controlnet_cond=control_image,
                     controlnet_mode=control_mode,
-                    conditioning_scale=cond_scale,
+                    conditioning_scale=controlnet_conditioning_scale,
                     timestep=timestep / 1000,
                     guidance=guidance,
                     pooled_projections=pooled_prompt_embeds,
@@ -1144,7 +1082,6 @@ class FluxControlNetInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, From
                     img_ids=latent_image_ids,
                     joint_attention_kwargs=self.joint_attention_kwargs,
                     return_dict=False,
-                    controlnet_blocks_repeat=controlnet_blocks_repeat,
                 )[0]
 
                 # compute the previous noisy sample x_t -> x_t-1
@@ -1177,9 +1114,6 @@ class FluxControlNetInpaintPipeline(DiffusionPipeline, FluxLoraLoaderMixin, From
 
                     latents = callback_outputs.pop("latents", latents)
                     prompt_embeds = callback_outputs.pop("prompt_embeds", prompt_embeds)
-                    control_image = callback_outputs.pop("control_image", control_image)
-                    mask = callback_outputs.pop("mask", mask)
-                    masked_image_latents = callback_outputs.pop("masked_image_latents", masked_image_latents)
 
                 if i == len(timesteps) - 1 or ((i + 1) > num_warmup_steps and (i + 1) % self.scheduler.order == 0):
                     progress_bar.update()

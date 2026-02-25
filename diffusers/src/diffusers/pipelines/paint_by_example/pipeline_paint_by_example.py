@@ -1,4 +1,4 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
+# Copyright 2024 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -23,20 +23,13 @@ from transformers import CLIPImageProcessor
 from ...image_processor import VaeImageProcessor
 from ...models import AutoencoderKL, UNet2DConditionModel
 from ...schedulers import DDIMScheduler, LMSDiscreteScheduler, PNDMScheduler
-from ...utils import deprecate, is_torch_xla_available, logging
+from ...utils import deprecate, logging
 from ...utils.torch_utils import randn_tensor
-from ..pipeline_utils import DeprecatedPipelineMixin, DiffusionPipeline, StableDiffusionMixin
+from ..pipeline_utils import DiffusionPipeline, StableDiffusionMixin
 from ..stable_diffusion import StableDiffusionPipelineOutput
 from ..stable_diffusion.safety_checker import StableDiffusionSafetyChecker
 from .image_encoder import PaintByExampleImageEncoder
 
-
-if is_torch_xla_available():
-    import torch_xla.core.xla_model as xm
-
-    XLA_AVAILABLE = True
-else:
-    XLA_AVAILABLE = False
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
@@ -155,8 +148,7 @@ def prepare_mask_and_masked_image(image, mask):
     return mask, masked_image
 
 
-class PaintByExamplePipeline(DeprecatedPipelineMixin, DiffusionPipeline, StableDiffusionMixin):
-    _last_supported_version = "0.33.1"
+class PaintByExamplePipeline(DiffusionPipeline, StableDiffusionMixin):
     r"""
     <Tip warning={true}>
 
@@ -217,7 +209,7 @@ class PaintByExamplePipeline(DeprecatedPipelineMixin, DiffusionPipeline, StableD
             safety_checker=safety_checker,
             feature_extractor=feature_extractor,
         )
-        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1) if getattr(self, "vae", None) else 8
+        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
         self.register_to_config(requires_safety_checker=requires_safety_checker)
 
@@ -240,7 +232,7 @@ class PaintByExamplePipeline(DeprecatedPipelineMixin, DiffusionPipeline, StableD
     def prepare_extra_step_kwargs(self, generator, eta):
         # prepare extra kwargs for the scheduler step, since not all schedulers have the same signature
         # eta (η) is only used with the DDIMScheduler, it will be ignored for other schedulers.
-        # eta corresponds to η in DDIM paper: https://huggingface.co/papers/2010.02502
+        # eta corresponds to η in DDIM paper: https://arxiv.org/abs/2010.02502
         # and should be between [0, 1]
 
         accepts_eta = "eta" in set(inspect.signature(self.scheduler.step).parameters.keys())
@@ -448,8 +440,8 @@ class PaintByExamplePipeline(DeprecatedPipelineMixin, DiffusionPipeline, StableD
             num_images_per_prompt (`int`, *optional*, defaults to 1):
                 The number of images to generate per prompt.
             eta (`float`, *optional*, defaults to 0.0):
-                Corresponds to parameter eta (η) from the [DDIM](https://huggingface.co/papers/2010.02502) paper. Only
-                applies to the [`~schedulers.DDIMScheduler`], and is ignored in other schedulers.
+                Corresponds to parameter eta (η) from the [DDIM](https://arxiv.org/abs/2010.02502) paper. Only applies
+                to the [`~schedulers.DDIMScheduler`], and is ignored in other schedulers.
             generator (`torch.Generator` or `List[torch.Generator]`, *optional*):
                 A [`torch.Generator`](https://pytorch.org/docs/stable/generated/torch.Generator.html) to make
                 generation deterministic.
@@ -522,7 +514,7 @@ class PaintByExamplePipeline(DeprecatedPipelineMixin, DiffusionPipeline, StableD
             batch_size = image.shape[0]
         device = self._execution_device
         # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
-        # of the Imagen paper: https://huggingface.co/papers/2205.11487 . `guidance_scale = 1`
+        # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
         # corresponds to doing no classifier free guidance.
         do_classifier_free_guidance = guidance_scale > 1.0
 
@@ -576,7 +568,7 @@ class PaintByExamplePipeline(DeprecatedPipelineMixin, DiffusionPipeline, StableD
                 f"Incorrect configuration settings! The config of `pipeline.unet`: {self.unet.config} expects"
                 f" {self.unet.config.in_channels} but received `num_channels_latents`: {num_channels_latents} +"
                 f" `num_channels_mask`: {num_channels_mask} + `num_channels_masked_image`: {num_channels_masked_image}"
-                f" = {num_channels_latents + num_channels_masked_image + num_channels_mask}. Please verify the config of"
+                f" = {num_channels_latents+num_channels_masked_image+num_channels_mask}. Please verify the config of"
                 " `pipeline.unet` or your `mask_image` or `image` input."
             )
 
@@ -611,9 +603,6 @@ class PaintByExamplePipeline(DeprecatedPipelineMixin, DiffusionPipeline, StableD
                     if callback is not None and i % callback_steps == 0:
                         step_idx = i // getattr(self.scheduler, "order", 1)
                         callback(step_idx, t, latents)
-
-                if XLA_AVAILABLE:
-                    xm.mark_step()
 
         self.maybe_free_model_hooks()
 

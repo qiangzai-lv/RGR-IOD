@@ -1,4 +1,4 @@
-# Copyright 2025 HuggingFace Inc.
+# Copyright 2024 HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,13 +21,7 @@ from transformers import CLIPTextConfig, CLIPTextModelWithProjection, CLIPTokeni
 
 from diffusers import HeunDiscreteScheduler, PriorTransformer, ShapEPipeline
 from diffusers.pipelines.shap_e import ShapERenderer
-from diffusers.utils.testing_utils import (
-    backend_empty_cache,
-    load_numpy,
-    nightly,
-    require_torch_accelerator,
-    torch_device,
-)
+from diffusers.utils.testing_utils import load_numpy, nightly, require_torch_gpu, torch_device
 
 from ..test_pipelines_common import PipelineTesterMixin, assert_mean_pixel_difference
 
@@ -228,19 +222,19 @@ class ShapEPipelineFastTests(PipelineTesterMixin, unittest.TestCase):
 
 
 @nightly
-@require_torch_accelerator
+@require_torch_gpu
 class ShapEPipelineIntegrationTests(unittest.TestCase):
     def setUp(self):
         # clean up the VRAM before each test
         super().setUp()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def tearDown(self):
         # clean up the VRAM after each test
         super().tearDown()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def test_shap_e(self):
         expected_image = load_numpy(

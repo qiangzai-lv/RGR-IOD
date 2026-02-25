@@ -7,7 +7,6 @@ from transformers import CLIPImageProcessor, CLIPTextModelWithProjection, CLIPTo
 from ...models import PriorTransformer
 from ...schedulers import UnCLIPScheduler
 from ...utils import (
-    is_torch_xla_available,
     logging,
     replace_example_docstring,
 )
@@ -16,15 +15,7 @@ from ..kandinsky import KandinskyPriorPipelineOutput
 from ..pipeline_utils import DiffusionPipeline
 
 
-if is_torch_xla_available():
-    import torch_xla.core.xla_model as xm
-
-    XLA_AVAILABLE = True
-else:
-    XLA_AVAILABLE = False
-
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
-
 
 EXAMPLE_DOC_STRING = """
     Examples:
@@ -203,11 +194,11 @@ class KandinskyV22PriorEmb2EmbPipeline(DiffusionPipeline):
                 The prompt not to guide the image generation. Ignored when not using guidance (i.e., ignored if
                 `guidance_scale` is less than `1`).
             guidance_scale (`float`, *optional*, defaults to 4.0):
-                Guidance scale as defined in [Classifier-Free Diffusion
-                Guidance](https://huggingface.co/papers/2207.12598). `guidance_scale` is defined as `w` of equation 2.
-                of [Imagen Paper](https://huggingface.co/papers/2205.11487). Guidance scale is enabled by setting
-                `guidance_scale > 1`. Higher guidance scale encourages to generate images that are closely linked to
-                the text `prompt`, usually at the expense of lower image quality.
+                Guidance scale as defined in [Classifier-Free Diffusion Guidance](https://arxiv.org/abs/2207.12598).
+                `guidance_scale` is defined as `w` of equation 2. of [Imagen
+                Paper](https://arxiv.org/pdf/2205.11487.pdf). Guidance scale is enabled by setting `guidance_scale >
+                1`. Higher guidance scale encourages to generate images that are closely linked to the text `prompt`,
+                usually at the expense of lower image quality.
 
         Examples:
 
@@ -441,11 +432,11 @@ class KandinskyV22PriorEmb2EmbPipeline(DiffusionPipeline):
                 One or a list of [torch generator(s)](https://pytorch.org/docs/stable/generated/torch.Generator.html)
                 to make generation deterministic.
             guidance_scale (`float`, *optional*, defaults to 4.0):
-                Guidance scale as defined in [Classifier-Free Diffusion
-                Guidance](https://huggingface.co/papers/2207.12598). `guidance_scale` is defined as `w` of equation 2.
-                of [Imagen Paper](https://huggingface.co/papers/2205.11487). Guidance scale is enabled by setting
-                `guidance_scale > 1`. Higher guidance scale encourages to generate images that are closely linked to
-                the text `prompt`, usually at the expense of lower image quality.
+                Guidance scale as defined in [Classifier-Free Diffusion Guidance](https://arxiv.org/abs/2207.12598).
+                `guidance_scale` is defined as `w` of equation 2. of [Imagen
+                Paper](https://arxiv.org/pdf/2205.11487.pdf). Guidance scale is enabled by setting `guidance_scale >
+                1`. Higher guidance scale encourages to generate images that are closely linked to the text `prompt`,
+                usually at the expense of lower image quality.
             output_type (`str`, *optional*, defaults to `"pt"`):
                 The output format of the generate image. Choose between: `"np"` (`np.array`) or `"pt"`
                 (`torch.Tensor`).
@@ -546,9 +537,6 @@ class KandinskyV22PriorEmb2EmbPipeline(DiffusionPipeline):
                 generator=generator,
                 prev_timestep=prev_timestep,
             ).prev_sample
-
-            if XLA_AVAILABLE:
-                xm.mark_step()
 
         latents = self.prior.post_process_latents(latents)
 

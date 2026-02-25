@@ -1,13 +1,12 @@
 import os
 import tempfile
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Union
 from urllib.parse import unquote, urlparse
 
 import PIL.Image
 import PIL.ImageOps
 import requests
 
-from .constants import DIFFUSERS_REQUEST_TIMEOUT
 from .import_utils import BACKENDS_MAPPING, is_imageio_available
 
 
@@ -30,7 +29,7 @@ def load_image(
     """
     if isinstance(image, str):
         if image.startswith("http://") or image.startswith("https://"):
-            image = PIL.Image.open(requests.get(image, stream=True, timeout=DIFFUSERS_REQUEST_TIMEOUT).raw)
+            image = PIL.Image.open(requests.get(image, stream=True).raw)
         elif os.path.isfile(image):
             image = PIL.Image.open(image)
         else:
@@ -136,28 +135,3 @@ def load_video(
         pil_images = convert_method(pil_images)
 
     return pil_images
-
-
-# Taken from `transformers`.
-def get_module_from_name(module, tensor_name: str) -> Tuple[Any, str]:
-    if "." in tensor_name:
-        splits = tensor_name.split(".")
-        for split in splits[:-1]:
-            new_module = getattr(module, split)
-            if new_module is None:
-                raise ValueError(f"{module} has no attribute {split}.")
-            module = new_module
-        tensor_name = splits[-1]
-    return module, tensor_name
-
-
-def get_submodule_by_name(root_module, module_path: str):
-    current = root_module
-    parts = module_path.split(".")
-    for part in parts:
-        if part.isdigit():
-            idx = int(part)
-            current = current[idx]  # e.g., for nn.ModuleList or nn.Sequential
-        else:
-            current = getattr(current, part)
-    return current

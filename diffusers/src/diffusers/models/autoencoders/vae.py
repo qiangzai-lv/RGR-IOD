@@ -1,4 +1,4 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
+# Copyright 2024 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from ...utils import BaseOutput
+from ...utils import BaseOutput, is_torch_version
 from ...utils.torch_utils import randn_tensor
 from ..activations import get_activation
 from ..attention_processor import SpatialNorm
@@ -28,19 +28,6 @@ from ..unets.unet_2d_blocks import (
     get_down_block,
     get_up_block,
 )
-
-
-@dataclass
-class EncoderOutput(BaseOutput):
-    r"""
-    Output of encoding method.
-
-    Args:
-        latent (`torch.Tensor` of shape `(batch_size, num_channels, latent_height, latent_width)`):
-            The encoded latent.
-    """
-
-    latent: torch.Tensor
 
 
 @dataclass
@@ -155,12 +142,29 @@ class Encoder(nn.Module):
 
         sample = self.conv_in(sample)
 
-        if torch.is_grad_enabled() and self.gradient_checkpointing:
+        if self.training and self.gradient_checkpointing:
+
+            def create_custom_forward(module):
+                def custom_forward(*inputs):
+                    return module(*inputs)
+
+                return custom_forward
+
             # down
-            for down_block in self.down_blocks:
-                sample = self._gradient_checkpointing_func(down_block, sample)
-            # middle
-            sample = self._gradient_checkpointing_func(self.mid_block, sample)
+            if is_torch_version(">=", "1.11.0"):
+                for down_block in self.down_blocks:
+                    sample = torch.utils.checkpoint.checkpoint(
+                        create_custom_forward(down_block), sample, use_reentrant=False
+                    )
+                # middle
+                sample = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(self.mid_block), sample, use_reentrant=False
+                )
+            else:
+                for down_block in self.down_blocks:
+                    sample = torch.utils.checkpoint.checkpoint(create_custom_forward(down_block), sample)
+                # middle
+                sample = torch.utils.checkpoint.checkpoint(create_custom_forward(self.mid_block), sample)
 
         else:
             # down
@@ -255,7 +259,7 @@ class Decoder(nn.Module):
                 num_layers=self.layers_per_block + 1,
                 in_channels=prev_output_channel,
                 out_channels=output_channel,
-                prev_output_channel=prev_output_channel,
+                prev_output_channel=None,
                 add_upsample=not is_final_block,
                 resnet_eps=1e-6,
                 resnet_act_fn=act_fn,
@@ -287,14 +291,42 @@ class Decoder(nn.Module):
         sample = self.conv_in(sample)
 
         upscale_dtype = next(iter(self.up_blocks.parameters())).dtype
-        if torch.is_grad_enabled() and self.gradient_checkpointing:
-            # middle
-            sample = self._gradient_checkpointing_func(self.mid_block, sample, latent_embeds)
-            sample = sample.to(upscale_dtype)
+        if self.training and self.gradient_checkpointing:
 
-            # up
-            for up_block in self.up_blocks:
-                sample = self._gradient_checkpointing_func(up_block, sample, latent_embeds)
+            def create_custom_forward(module):
+                def custom_forward(*inputs):
+                    return module(*inputs)
+
+                return custom_forward
+
+            if is_torch_version(">=", "1.11.0"):
+                # middle
+                sample = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(self.mid_block),
+                    sample,
+                    latent_embeds,
+                    use_reentrant=False,
+                )
+                sample = sample.to(upscale_dtype)
+
+                # up
+                for up_block in self.up_blocks:
+                    sample = torch.utils.checkpoint.checkpoint(
+                        create_custom_forward(up_block),
+                        sample,
+                        latent_embeds,
+                        use_reentrant=False,
+                    )
+            else:
+                # middle
+                sample = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(self.mid_block), sample, latent_embeds
+                )
+                sample = sample.to(upscale_dtype)
+
+                # up
+                for up_block in self.up_blocks:
+                    sample = torch.utils.checkpoint.checkpoint(create_custom_forward(up_block), sample, latent_embeds)
         else:
             # middle
             sample = self.mid_block(sample, latent_embeds)
@@ -512,29 +544,73 @@ class MaskConditionDecoder(nn.Module):
         sample = self.conv_in(sample)
 
         upscale_dtype = next(iter(self.up_blocks.parameters())).dtype
-        if torch.is_grad_enabled() and self.gradient_checkpointing:
-            # middle
-            sample = self._gradient_checkpointing_func(self.mid_block, sample, latent_embeds)
-            sample = sample.to(upscale_dtype)
+        if self.training and self.gradient_checkpointing:
 
-            # condition encoder
-            if image is not None and mask is not None:
-                masked_image = (1 - mask) * image
-                im_x = self._gradient_checkpointing_func(
-                    self.condition_encoder,
-                    masked_image,
-                    mask,
+            def create_custom_forward(module):
+                def custom_forward(*inputs):
+                    return module(*inputs)
+
+                return custom_forward
+
+            if is_torch_version(">=", "1.11.0"):
+                # middle
+                sample = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(self.mid_block),
+                    sample,
+                    latent_embeds,
+                    use_reentrant=False,
                 )
+                sample = sample.to(upscale_dtype)
 
-            # up
-            for up_block in self.up_blocks:
+                # condition encoder
                 if image is not None and mask is not None:
-                    sample_ = im_x[str(tuple(sample.shape))]
-                    mask_ = nn.functional.interpolate(mask, size=sample.shape[-2:], mode="nearest")
-                    sample = sample * mask_ + sample_ * (1 - mask_)
-                sample = self._gradient_checkpointing_func(up_block, sample, latent_embeds)
-            if image is not None and mask is not None:
-                sample = sample * mask + im_x[str(tuple(sample.shape))] * (1 - mask)
+                    masked_image = (1 - mask) * image
+                    im_x = torch.utils.checkpoint.checkpoint(
+                        create_custom_forward(self.condition_encoder),
+                        masked_image,
+                        mask,
+                        use_reentrant=False,
+                    )
+
+                # up
+                for up_block in self.up_blocks:
+                    if image is not None and mask is not None:
+                        sample_ = im_x[str(tuple(sample.shape))]
+                        mask_ = nn.functional.interpolate(mask, size=sample.shape[-2:], mode="nearest")
+                        sample = sample * mask_ + sample_ * (1 - mask_)
+                    sample = torch.utils.checkpoint.checkpoint(
+                        create_custom_forward(up_block),
+                        sample,
+                        latent_embeds,
+                        use_reentrant=False,
+                    )
+                if image is not None and mask is not None:
+                    sample = sample * mask + im_x[str(tuple(sample.shape))] * (1 - mask)
+            else:
+                # middle
+                sample = torch.utils.checkpoint.checkpoint(
+                    create_custom_forward(self.mid_block), sample, latent_embeds
+                )
+                sample = sample.to(upscale_dtype)
+
+                # condition encoder
+                if image is not None and mask is not None:
+                    masked_image = (1 - mask) * image
+                    im_x = torch.utils.checkpoint.checkpoint(
+                        create_custom_forward(self.condition_encoder),
+                        masked_image,
+                        mask,
+                    )
+
+                # up
+                for up_block in self.up_blocks:
+                    if image is not None and mask is not None:
+                        sample_ = im_x[str(tuple(sample.shape))]
+                        mask_ = nn.functional.interpolate(mask, size=sample.shape[-2:], mode="nearest")
+                        sample = sample * mask_ + sample_ * (1 - mask_)
+                    sample = torch.utils.checkpoint.checkpoint(create_custom_forward(up_block), sample, latent_embeds)
+                if image is not None and mask is not None:
+                    sample = sample * mask + im_x[str(tuple(sample.shape))] * (1 - mask)
         else:
             # middle
             sample = self.mid_block(sample, latent_embeds)
@@ -744,17 +820,6 @@ class DiagonalGaussianDistribution(object):
         return self.mean
 
 
-class IdentityDistribution(object):
-    def __init__(self, parameters: torch.Tensor):
-        self.parameters = parameters
-
-    def sample(self, generator: Optional[torch.Generator] = None) -> torch.Tensor:
-        return self.parameters
-
-    def mode(self) -> torch.Tensor:
-        return self.parameters
-
-
 class EncoderTiny(nn.Module):
     r"""
     The `EncoderTiny` layer is a simpler version of the `Encoder` layer.
@@ -811,8 +876,18 @@ class EncoderTiny(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         r"""The forward method of the `EncoderTiny` class."""
-        if torch.is_grad_enabled() and self.gradient_checkpointing:
-            x = self._gradient_checkpointing_func(self.layers, x)
+        if self.training and self.gradient_checkpointing:
+
+            def create_custom_forward(module):
+                def custom_forward(*inputs):
+                    return module(*inputs)
+
+                return custom_forward
+
+            if is_torch_version(">=", "1.11.0"):
+                x = torch.utils.checkpoint.checkpoint(create_custom_forward(self.layers), x, use_reentrant=False)
+            else:
+                x = torch.utils.checkpoint.checkpoint(create_custom_forward(self.layers), x)
 
         else:
             # scale image from [-1, 1] to [0, 1] to match TAESD convention
@@ -887,8 +962,19 @@ class DecoderTiny(nn.Module):
         # Clamp.
         x = torch.tanh(x / 3) * 3
 
-        if torch.is_grad_enabled() and self.gradient_checkpointing:
-            x = self._gradient_checkpointing_func(self.layers, x)
+        if self.training and self.gradient_checkpointing:
+
+            def create_custom_forward(module):
+                def custom_forward(*inputs):
+                    return module(*inputs)
+
+                return custom_forward
+
+            if is_torch_version(">=", "1.11.0"):
+                x = torch.utils.checkpoint.checkpoint(create_custom_forward(self.layers), x, use_reentrant=False)
+            else:
+                x = torch.utils.checkpoint.checkpoint(create_custom_forward(self.layers), x)
+
         else:
             x = self.layers(x)
 

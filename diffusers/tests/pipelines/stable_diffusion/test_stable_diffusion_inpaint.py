@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 HuggingFace Inc.
+# Copyright 2024 HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 
 import gc
 import random
+import traceback
 import unittest
 
 import numpy as np
@@ -36,17 +37,15 @@ from diffusers import (
     UNet2DConditionModel,
 )
 from diffusers.utils.testing_utils import (
-    Expectations,
-    backend_empty_cache,
-    backend_max_memory_allocated,
-    backend_reset_max_memory_allocated,
-    backend_reset_peak_memory_stats,
     enable_full_determinism,
     floats_tensor,
+    is_torch_compile,
     load_image,
     load_numpy,
     nightly,
-    require_torch_accelerator,
+    require_torch_2,
+    require_torch_gpu,
+    run_test_in_subprocess,
     slow,
     torch_device,
 )
@@ -65,6 +64,40 @@ from ..test_pipelines_common import (
 
 
 enable_full_determinism()
+
+
+# Will be run via run_test_in_subprocess
+def _test_inpaint_compile(in_queue, out_queue, timeout):
+    error = None
+    try:
+        inputs = in_queue.get(timeout=timeout)
+        torch_device = inputs.pop("torch_device")
+        seed = inputs.pop("seed")
+        inputs["generator"] = torch.Generator(device=torch_device).manual_seed(seed)
+
+        pipe = StableDiffusionInpaintPipeline.from_pretrained(
+            "botp/stable-diffusion-v1-5-inpainting", safety_checker=None
+        )
+        pipe.unet.set_default_attn_processor()
+        pipe.scheduler = PNDMScheduler.from_config(pipe.scheduler.config)
+        pipe.to(torch_device)
+        pipe.set_progress_bar_config(disable=None)
+
+        pipe.unet.to(memory_format=torch.channels_last)
+        pipe.unet = torch.compile(pipe.unet, mode="reduce-overhead", fullgraph=True)
+
+        image = pipe(**inputs).images
+        image_slice = image[0, 253:256, 253:256, -1].flatten()
+
+        assert image.shape == (1, 512, 512, 3)
+        expected_slice = np.array([0.0689, 0.0699, 0.0790, 0.0536, 0.0470, 0.0488, 0.041, 0.0508, 0.04179])
+        assert np.abs(expected_slice - image_slice).max() < 3e-3
+    except Exception:
+        error = f"{traceback.format_exc()}"
+
+    results = {"error": error}
+    out_queue.put(results, timeout=timeout)
+    out_queue.join()
 
 
 class StableDiffusionInpaintPipelineFastTests(
@@ -361,13 +394,6 @@ class StableDiffusionInpaintPipelineFastTests(
                 )
         return super().test_ip_adapter(expected_pipe_slice=expected_pipe_slice)
 
-    def test_encode_prompt_works_in_isolation(self):
-        extra_required_param_value_dict = {
-            "device": torch.device(torch_device).type,
-            "do_classifier_free_guidance": self.get_dummy_inputs(device=torch_device).get("guidance_scale", 1.0) > 1.0,
-        }
-        return super().test_encode_prompt_works_in_isolation(extra_required_param_value_dict, atol=1e-3, rtol=1e-3)
-
 
 class StableDiffusionSimpleInpaintPipelineFastTests(StableDiffusionInpaintPipelineFastTests):
     pipeline_class = StableDiffusionInpaintPipeline
@@ -569,7 +595,7 @@ class StableDiffusionSimpleInpaintPipelineFastTests(StableDiffusionInpaintPipeli
 
 
 @slow
-@require_torch_accelerator
+@require_torch_gpu
 class StableDiffusionInpaintPipelineSlowTests(unittest.TestCase):
     def setUp(self):
         super().setUp()
@@ -577,7 +603,7 @@ class StableDiffusionInpaintPipelineSlowTests(unittest.TestCase):
     def tearDown(self):
         super().tearDown()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def get_inputs(self, device, generator_device="cpu", dtype=torch.float32, seed=0):
         generator = torch.Generator(device=generator_device).manual_seed(seed)
@@ -671,23 +697,34 @@ class StableDiffusionInpaintPipelineSlowTests(unittest.TestCase):
         assert np.abs(expected_slice - image_slice).max() < 6e-3
 
     def test_stable_diffusion_inpaint_with_sequential_cpu_offloading(self):
-        backend_empty_cache(torch_device)
-        backend_reset_max_memory_allocated(torch_device)
-        backend_reset_peak_memory_stats(torch_device)
+        torch.cuda.empty_cache()
+        torch.cuda.reset_max_memory_allocated()
+        torch.cuda.reset_peak_memory_stats()
 
         pipe = StableDiffusionInpaintPipeline.from_pretrained(
             "botp/stable-diffusion-v1-5-inpainting", safety_checker=None, torch_dtype=torch.float16
         )
         pipe.set_progress_bar_config(disable=None)
         pipe.enable_attention_slicing(1)
-        pipe.enable_sequential_cpu_offload(device=torch_device)
+        pipe.enable_sequential_cpu_offload()
 
         inputs = self.get_inputs(torch_device, dtype=torch.float16)
         _ = pipe(**inputs)
 
-        mem_bytes = backend_max_memory_allocated(torch_device)
+        mem_bytes = torch.cuda.max_memory_allocated()
         # make sure that less than 2.2 GB is allocated
         assert mem_bytes < 2.2 * 10**9
+
+    @is_torch_compile
+    @require_torch_2
+    def test_inpaint_compile(self):
+        seed = 0
+        inputs = self.get_inputs(torch_device, seed=seed)
+        # Can't pickle a Generator object
+        del inputs["generator"]
+        inputs["torch_device"] = torch_device
+        inputs["seed"] = seed
+        run_test_in_subprocess(test_case=self, target_func=_test_inpaint_compile, inputs=inputs)
 
     def test_stable_diffusion_inpaint_pil_input_resolution_test(self):
         pipe = StableDiffusionInpaintPipeline.from_pretrained(
@@ -730,9 +767,7 @@ class StableDiffusionInpaintPipelineSlowTests(unittest.TestCase):
         assert np.abs(expected_slice - image_slice).max() < 1e-3
 
     def test_stable_diffusion_simple_inpaint_ddim(self):
-        pipe = StableDiffusionInpaintPipeline.from_pretrained(
-            "stable-diffusion-v1-5/stable-diffusion-v1-5", safety_checker=None
-        )
+        pipe = StableDiffusionInpaintPipeline.from_pretrained("Jiali/stable-diffusion-1.5", safety_checker=None)
         pipe.unet.set_default_attn_processor()
         pipe.to(torch_device)
         pipe.set_progress_bar_config(disable=None)
@@ -749,7 +784,7 @@ class StableDiffusionInpaintPipelineSlowTests(unittest.TestCase):
 
 
 @slow
-@require_torch_accelerator
+@require_torch_gpu
 class StableDiffusionInpaintPipelineAsymmetricAutoencoderKLSlowTests(unittest.TestCase):
     def setUp(self):
         super().setUp()
@@ -757,7 +792,7 @@ class StableDiffusionInpaintPipelineAsymmetricAutoencoderKLSlowTests(unittest.Te
     def tearDown(self):
         super().tearDown()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def get_inputs(self, device, generator_device="cpu", dtype=torch.float32, seed=0):
         generator = torch.Generator(device=generator_device).manual_seed(seed)
@@ -818,37 +853,7 @@ class StableDiffusionInpaintPipelineAsymmetricAutoencoderKLSlowTests(unittest.Te
         image_slice = image[0, 253:256, 253:256, -1].flatten()
 
         assert image.shape == (1, 512, 512, 3)
-        expected_slices = Expectations(
-            {
-                ("xpu", 3): np.array(
-                    [
-                        0.2063,
-                        0.1731,
-                        0.1553,
-                        0.1741,
-                        0.1772,
-                        0.1077,
-                        0.2109,
-                        0.2407,
-                        0.1243,
-                    ]
-                ),
-                ("cuda", 7): np.array(
-                    [
-                        0.1343,
-                        0.1406,
-                        0.1440,
-                        0.1504,
-                        0.1729,
-                        0.0989,
-                        0.1807,
-                        0.2822,
-                        0.1179,
-                    ]
-                ),
-            }
-        )
-        expected_slice = expected_slices.get_expectation()
+        expected_slice = np.array([0.1343, 0.1406, 0.1440, 0.1504, 0.1729, 0.0989, 0.1807, 0.2822, 0.1179])
 
         assert np.abs(expected_slice - image_slice).max() < 5e-2
 
@@ -893,9 +898,9 @@ class StableDiffusionInpaintPipelineAsymmetricAutoencoderKLSlowTests(unittest.Te
         assert np.abs(expected_slice - image_slice).max() < 6e-3
 
     def test_stable_diffusion_inpaint_with_sequential_cpu_offloading(self):
-        backend_empty_cache(torch_device)
-        backend_reset_max_memory_allocated(torch_device)
-        backend_reset_peak_memory_stats(torch_device)
+        torch.cuda.empty_cache()
+        torch.cuda.reset_max_memory_allocated()
+        torch.cuda.reset_peak_memory_stats()
 
         vae = AsymmetricAutoencoderKL.from_pretrained(
             "cross-attention/asymmetric-autoencoder-kl-x-1-5", torch_dtype=torch.float16
@@ -906,14 +911,19 @@ class StableDiffusionInpaintPipelineAsymmetricAutoencoderKLSlowTests(unittest.Te
         pipe.vae = vae
         pipe.set_progress_bar_config(disable=None)
         pipe.enable_attention_slicing(1)
-        pipe.enable_sequential_cpu_offload(device=torch_device)
+        pipe.enable_sequential_cpu_offload()
 
         inputs = self.get_inputs(torch_device, dtype=torch.float16)
         _ = pipe(**inputs)
 
-        mem_bytes = backend_max_memory_allocated(torch_device)
+        mem_bytes = torch.cuda.max_memory_allocated()
         # make sure that less than 2.45 GB is allocated
         assert mem_bytes < 2.45 * 10**9
+
+    @is_torch_compile
+    @require_torch_2
+    def test_inpaint_compile(self):
+        pass
 
     def test_stable_diffusion_inpaint_pil_input_resolution_test(self):
         vae = AsymmetricAutoencoderKL.from_pretrained(
@@ -963,9 +973,7 @@ class StableDiffusionInpaintPipelineAsymmetricAutoencoderKLSlowTests(unittest.Te
 
     def test_stable_diffusion_simple_inpaint_ddim(self):
         vae = AsymmetricAutoencoderKL.from_pretrained("cross-attention/asymmetric-autoencoder-kl-x-1-5")
-        pipe = StableDiffusionInpaintPipeline.from_pretrained(
-            "stable-diffusion-v1-5/stable-diffusion-v1-5", safety_checker=None
-        )
+        pipe = StableDiffusionInpaintPipeline.from_pretrained("Jiali/stable-diffusion-1.5", safety_checker=None)
         pipe.vae = vae
         pipe.unet.set_default_attn_processor()
         pipe.to(torch_device)
@@ -990,7 +998,7 @@ class StableDiffusionInpaintPipelineAsymmetricAutoencoderKLSlowTests(unittest.Te
         pipe = StableDiffusionInpaintPipeline.from_single_file(filename, torch_dtype=torch.float16)
         pipe.vae = vae
         pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
-        pipe.to(torch_device)
+        pipe.to("cuda")
 
         inputs = self.get_inputs(torch_device)
         inputs["num_inference_steps"] = 1
@@ -1000,17 +1008,17 @@ class StableDiffusionInpaintPipelineAsymmetricAutoencoderKLSlowTests(unittest.Te
 
 
 @nightly
-@require_torch_accelerator
+@require_torch_gpu
 class StableDiffusionInpaintPipelineNightlyTests(unittest.TestCase):
     def setUp(self):
         super().setUp()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def tearDown(self):
         super().tearDown()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def get_inputs(self, device, generator_device="cpu", dtype=torch.float32, seed=0):
         generator = torch.Generator(device=generator_device).manual_seed(seed)

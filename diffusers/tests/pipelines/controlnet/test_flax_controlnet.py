@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 HuggingFace Inc.
+# Copyright 2024 HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -41,7 +41,7 @@ class FlaxControlNetPipelineIntegrationTests(unittest.TestCase):
             "lllyasviel/sd-controlnet-canny", from_pt=True, dtype=jnp.bfloat16
         )
         pipe, params = FlaxStableDiffusionControlNetPipeline.from_pretrained(
-            "stable-diffusion-v1-5/stable-diffusion-v1-5", controlnet=controlnet, from_pt=True, dtype=jnp.bfloat16
+            "Jiali/stable-diffusion-1.5", controlnet=controlnet, from_pt=True, dtype=jnp.bfloat16
         )
         params["controlnet"] = controlnet_params
 
@@ -78,7 +78,7 @@ class FlaxControlNetPipelineIntegrationTests(unittest.TestCase):
         expected_slice = jnp.array(
             [0.167969, 0.116699, 0.081543, 0.154297, 0.132812, 0.108887, 0.169922, 0.169922, 0.205078]
         )
-
+        print(f"output_slice: {output_slice}")
         assert jnp.abs(output_slice - expected_slice).max() < 1e-2
 
     def test_pose(self):
@@ -86,7 +86,7 @@ class FlaxControlNetPipelineIntegrationTests(unittest.TestCase):
             "lllyasviel/sd-controlnet-openpose", from_pt=True, dtype=jnp.bfloat16
         )
         pipe, params = FlaxStableDiffusionControlNetPipeline.from_pretrained(
-            "stable-diffusion-v1-5/stable-diffusion-v1-5", controlnet=controlnet, from_pt=True, dtype=jnp.bfloat16
+            "Jiali/stable-diffusion-1.5", controlnet=controlnet, from_pt=True, dtype=jnp.bfloat16
         )
         params["controlnet"] = controlnet_params
 
@@ -123,5 +123,5 @@ class FlaxControlNetPipelineIntegrationTests(unittest.TestCase):
         expected_slice = jnp.array(
             [[0.271484, 0.261719, 0.275391, 0.277344, 0.279297, 0.291016, 0.294922, 0.302734, 0.302734]]
         )
-
+        print(f"output_slice: {output_slice}")
         assert jnp.abs(output_slice - expected_slice).max() < 1e-2

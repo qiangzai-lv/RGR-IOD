@@ -1,4 +1,4 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
+# Copyright 2024 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -60,15 +60,13 @@ class ConsistencyDecoderVAE(ModelMixin, ConfigMixin):
 
         >>> vae = ConsistencyDecoderVAE.from_pretrained("openai/consistency-decoder", torch_dtype=torch.float16)
         >>> pipe = StableDiffusionPipeline.from_pretrained(
-        ...     "stable-diffusion-v1-5/stable-diffusion-v1-5", vae=vae, torch_dtype=torch.float16
+        ...     "runwayml/stable-diffusion-v1-5", vae=vae, torch_dtype=torch.float16
         ... ).to("cuda")
 
         >>> image = pipe("horse", generator=torch.manual_seed(0)).images[0]
         >>> image
         ```
     """
-
-    _supports_group_offloading = False
 
     @register_to_config
     def __init__(

@@ -72,18 +72,25 @@ EXAMPLE_DOC_STRING = """
     Examples:
         ```py
         >>> import torch
+        >>> import PIL
+        >>> import requests
+        >>> from io import BytesIO
 
         >>> from diffusers import LEditsPPPipelineStableDiffusionXL
-        >>> from diffusers.utils import load_image
 
         >>> pipe = LEditsPPPipelineStableDiffusionXL.from_pretrained(
-        ...     "stabilityai/stable-diffusion-xl-base-1.0", variant="fp16", torch_dtype=torch.float16
+        ...     "stabilityai/stable-diffusion-xl-base-1.0", torch_dtype=torch.float16
         ... )
-        >>> pipe.enable_vae_tiling()
         >>> pipe = pipe.to("cuda")
 
+
+        >>> def download_image(url):
+        ...     response = requests.get(url)
+        ...     return PIL.Image.open(BytesIO(response.content)).convert("RGB")
+
+
         >>> img_url = "https://www.aiml.informatik.tu-darmstadt.de/people/mbrack/tennis.jpg"
-        >>> image = load_image(img_url).resize((1024, 1024))
+        >>> image = download_image(img_url)
 
         >>> _ = pipe.invert(image=image, num_inversion_steps=50, skip=0.2)
 
@@ -190,7 +197,7 @@ class LeditsGaussianSmoothing:
 
         # The gaussian kernel is the product of the gaussian function of each dimension.
         kernel = 1
-        meshgrids = torch.meshgrid([torch.arange(size, dtype=torch.float32) for size in kernel_size], indexing="ij")
+        meshgrids = torch.meshgrid([torch.arange(size, dtype=torch.float32) for size in kernel_size])
         for size, std, mgrid in zip(kernel_size, sigma, meshgrids):
             mean = (size - 1) / 2
             kernel *= 1 / (std * math.sqrt(2 * math.pi)) * torch.exp(-(((mgrid - mean) / (2 * std)) ** 2))
@@ -372,7 +379,7 @@ class LEditsPPPipelineStableDiffusionXL(
             feature_extractor=feature_extractor,
         )
         self.register_to_config(force_zeros_for_empty_prompt=force_zeros_for_empty_prompt)
-        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1) if getattr(self, "vae", None) else 8
+        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1)
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
 
         if not isinstance(scheduler, DDIMScheduler) and not isinstance(scheduler, DPMSolverMultistepScheduler):
@@ -384,11 +391,7 @@ class LEditsPPPipelineStableDiffusionXL(
                 "The scheduler has been changed to DPMSolverMultistepScheduler."
             )
 
-        self.default_sample_size = (
-            self.unet.config.sample_size
-            if hasattr(self, "unet") and self.unet is not None and hasattr(self.unet.config, "sample_size")
-            else 128
-        )
+        self.default_sample_size = self.unet.config.sample_size
 
         add_watermarker = add_watermarker if add_watermarker is not None else is_invisible_watermark_available()
 
@@ -622,7 +625,7 @@ class LEditsPPPipelineStableDiffusionXL(
     def prepare_extra_step_kwargs(self, eta, generator=None):
         # prepare extra kwargs for the scheduler step, since not all schedulers have the same signature
         # eta (η) is only used with the DDIMScheduler, it will be ignored for other schedulers.
-        # eta corresponds to η in DDIM paper: https://huggingface.co/papers/2010.02502
+        # eta corresponds to η in DDIM paper: https://arxiv.org/abs/2010.02502
         # and should be between [0, 1]
 
         accepts_eta = "eta" in set(inspect.signature(self.scheduler.step).parameters.keys())
@@ -747,7 +750,7 @@ class LEditsPPPipelineStableDiffusionXL(
         return self._clip_skip
 
     # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
-    # of the Imagen paper: https://huggingface.co/papers/2205.11487 . `guidance_scale = 1`
+    # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
     # corresponds to doing no classifier free guidance.
     @property
     def do_classifier_free_guidance(self):
@@ -764,35 +767,6 @@ class LEditsPPPipelineStableDiffusionXL(
     @property
     def num_timesteps(self):
         return self._num_timesteps
-
-    def enable_vae_slicing(self):
-        r"""
-        Enable sliced VAE decoding. When this option is enabled, the VAE will split the input tensor in slices to
-        compute decoding in several steps. This is useful to save some memory and allow larger batch sizes.
-        """
-        self.vae.enable_slicing()
-
-    def disable_vae_slicing(self):
-        r"""
-        Disable sliced VAE decoding. If `enable_vae_slicing` was previously enabled, this method will go back to
-        computing decoding in one step.
-        """
-        self.vae.disable_slicing()
-
-    def enable_vae_tiling(self):
-        r"""
-        Enable tiled VAE decoding. When this option is enabled, the VAE will split the input tensor into tiles to
-        compute decoding and encoding in several steps. This is useful for saving a large amount of memory and to allow
-        processing larger images.
-        """
-        self.vae.enable_tiling()
-
-    def disable_vae_tiling(self):
-        r"""
-        Disable tiled VAE decoding. If `enable_vae_tiling` was previously enabled, this method will go back to
-        computing decoding in one step.
-        """
-        self.vae.disable_tiling()
 
     # Copied from diffusers.pipelines.ledits_pp.pipeline_leditspp_stable_diffusion.LEditsPPPipelineStableDiffusion.prepare_unet
     def prepare_unet(self, attention_store, PnP: bool = False):
@@ -901,10 +875,9 @@ class LEditsPPPipelineStableDiffusionXL(
                 [diffusers.models.attention_processor](https://github.com/huggingface/diffusers/blob/main/src/diffusers/models/attention_processor.py).
             guidance_rescale (`float`, *optional*, defaults to 0.7):
                 Guidance rescale factor proposed by [Common Diffusion Noise Schedules and Sample Steps are
-                Flawed](https://huggingface.co/papers/2305.08891) `guidance_scale` is defined as `φ` in equation 16. of
-                [Common Diffusion Noise Schedules and Sample Steps are
-                Flawed](https://huggingface.co/papers/2305.08891). Guidance rescale factor should fix overexposure when
-                using zero terminal SNR.
+                Flawed](https://arxiv.org/pdf/2305.08891.pdf) `guidance_scale` is defined as `φ` in equation 16. of
+                [Common Diffusion Noise Schedules and Sample Steps are Flawed](https://arxiv.org/pdf/2305.08891.pdf).
+                Guidance rescale factor should fix overexposure when using zero terminal SNR.
             crops_coords_top_left (`Tuple[int]`, *optional*, defaults to (0, 0)):
                 `crops_coords_top_left` can be used to generate an image that appears to be "cropped" from the position
                 `crops_coords_top_left` downwards. Favorable, well-centered images are usually achieved by setting
@@ -930,7 +903,7 @@ class LEditsPPPipelineStableDiffusionXL(
             edit_guidance_scale (`float` or `List[float]`, *optional*, defaults to 5):
                 Guidance scale for guiding the image generation. If provided as list values should correspond to
                 `editing_prompt`. `edit_guidance_scale` is defined as `s_e` of equation 12 of [LEDITS++
-                Paper](https://huggingface.co/papers/2301.12247).
+                Paper](https://arxiv.org/abs/2301.12247).
             edit_warmup_steps (`float` or `List[float]`, *optional*, defaults to 10):
                 Number of diffusion steps (for each prompt) for which guidance is not applied.
             edit_cooldown_steps (`float` or `List[float]`, *optional*, defaults to `None`):
@@ -938,18 +911,18 @@ class LEditsPPPipelineStableDiffusionXL(
             edit_threshold (`float` or `List[float]`, *optional*, defaults to 0.9):
                 Masking threshold of guidance. Threshold should be proportional to the image region that is modified.
                 'edit_threshold' is defined as 'λ' of equation 12 of [LEDITS++
-                Paper](https://huggingface.co/papers/2301.12247).
+                Paper](https://arxiv.org/abs/2301.12247).
             sem_guidance (`List[torch.Tensor]`, *optional*):
                 List of pre-generated guidance vectors to be applied at generation. Length of the list has to
                 correspond to `num_inference_steps`.
             use_cross_attn_mask:
                 Whether cross-attention masks are used. Cross-attention masks are always used when use_intersect_mask
                 is set to true. Cross-attention masks are defined as 'M^1' of equation 12 of [LEDITS++
-                paper](https://huggingface.co/papers/2311.16711).
+                paper](https://arxiv.org/pdf/2311.16711.pdf).
             use_intersect_mask:
                 Whether the masking term is calculated as intersection of cross-attention masks and masks derived from
                 the noise estimate. Cross-attention mask are defined as 'M^1' and masks derived from the noise estimate
-                are defined as 'M^2' of equation 12 of [LEDITS++ paper](https://huggingface.co/papers/2311.16711).
+                are defined as 'M^2' of equation 12 of [LEDITS++ paper](https://arxiv.org/pdf/2311.16711.pdf).
             user_mask:
                 User-provided mask for even better control over the editing process. This is helpful when LEDITS++'s
                 implicit masks do not meet user preferences.
@@ -1351,7 +1324,7 @@ class LEditsPPPipelineStableDiffusionXL(
 
                 # compute the previous noisy sample x_t -> x_t-1
                 if enable_edit_guidance and self.guidance_rescale > 0.0:
-                    # Based on 3.4. in https://huggingface.co/papers/2305.08891
+                    # Based on 3.4. in https://arxiv.org/pdf/2305.08891.pdf
                     noise_pred = rescale_noise_cfg(
                         noise_pred,
                         noise_pred_edit_concepts.mean(dim=0, keepdim=False),
@@ -1428,12 +1401,6 @@ class LEditsPPPipelineStableDiffusionXL(
         image = self.image_processor.preprocess(
             image=image, height=height, width=width, resize_mode=resize_mode, crops_coords=crops_coords
         )
-        height, width = image.shape[-2:]
-        if height % 32 != 0 or width % 32 != 0:
-            raise ValueError(
-                "Image height and width must be a factor of 32. "
-                "Consider down-sampling the input using the `height` and `width` parameters"
-            )
         resized = self.image_processor.postprocess(image=image, output_type="pil")
 
         if max(image.shape[-2:]) > self.vae.config["sample_size"] * 1.5:
@@ -1472,15 +1439,11 @@ class LEditsPPPipelineStableDiffusionXL(
         crops_coords_top_left: Tuple[int, int] = (0, 0),
         num_zero_noise_steps: int = 3,
         cross_attention_kwargs: Optional[Dict[str, Any]] = None,
-        height: Optional[int] = None,
-        width: Optional[int] = None,
-        resize_mode: Optional[str] = "default",
-        crops_coords: Optional[Tuple[int, int, int, int]] = None,
     ):
         r"""
         The function to the pipeline for image inversion as described by the [LEDITS++
-        Paper](https://huggingface.co/papers/2301.12247). If the scheduler is set to [`~schedulers.DDIMScheduler`] the
-        inversion proposed by [edit-friendly DPDM](https://huggingface.co/papers/2304.06140) will be performed instead.
+        Paper](https://arxiv.org/abs/2301.12247). If the scheduler is set to [`~schedulers.DDIMScheduler`] the
+        inversion proposed by [edit-friendly DPDM](https://arxiv.org/abs/2304.06140) will be performed instead.
 
         Args:
             image (`PipelineImageInput`):
@@ -1523,8 +1486,6 @@ class LEditsPPPipelineStableDiffusionXL(
             [`~pipelines.ledits_pp.LEditsPPInversionPipelineOutput`]: Output will contain the resized input image(s)
             and respective VAE reconstruction(s).
         """
-        if height is not None and height % 32 != 0 or width is not None and width % 32 != 0:
-            raise ValueError("height and width must be a factor of 32.")
 
         # Reset attn processor, we do not want to store attn maps during inversion
         self.unet.set_attn_processor(AttnProcessor())
@@ -1549,14 +1510,7 @@ class LEditsPPPipelineStableDiffusionXL(
             do_classifier_free_guidance = source_guidance_scale > 1.0
 
         # 1. prepare image
-        x0, resized = self.encode_image(
-            image,
-            dtype=self.text_encoder_2.dtype,
-            height=height,
-            width=width,
-            resize_mode=resize_mode,
-            crops_coords=crops_coords,
-        )
+        x0, resized = self.encode_image(image, dtype=self.text_encoder_2.dtype)
         width = x0.shape[2] * self.vae_scale_factor
         height = x0.shape[3] * self.vae_scale_factor
         self.size = (height, width)
@@ -1689,21 +1643,9 @@ class LEditsPPPipelineStableDiffusionXL(
 
 # Copied from diffusers.pipelines.stable_diffusion_xl.pipeline_stable_diffusion_xl.rescale_noise_cfg
 def rescale_noise_cfg(noise_cfg, noise_pred_text, guidance_rescale=0.0):
-    r"""
-    Rescales `noise_cfg` tensor based on `guidance_rescale` to improve image quality and fix overexposure. Based on
-    Section 3.4 from [Common Diffusion Noise Schedules and Sample Steps are
-    Flawed](https://huggingface.co/papers/2305.08891).
-
-    Args:
-        noise_cfg (`torch.Tensor`):
-            The predicted noise tensor for the guided diffusion process.
-        noise_pred_text (`torch.Tensor`):
-            The predicted noise tensor for the text-guided diffusion process.
-        guidance_rescale (`float`, *optional*, defaults to 0.0):
-            A rescale factor applied to the noise predictions.
-
-    Returns:
-        noise_cfg (`torch.Tensor`): The rescaled noise prediction tensor.
+    """
+    Rescale `noise_cfg` according to `guidance_rescale`. Based on findings of [Common Diffusion Noise Schedules and
+    Sample Steps are Flawed](https://arxiv.org/pdf/2305.08891.pdf). See Section 3.4
     """
     std_text = noise_pred_text.std(dim=list(range(1, noise_pred_text.ndim)), keepdim=True)
     std_cfg = noise_cfg.std(dim=list(range(1, noise_cfg.ndim)), keepdim=True)
@@ -1728,7 +1670,7 @@ def compute_noise_ddim(scheduler, prev_latents, latents, timestep, noise_pred, e
     beta_prod_t = 1 - alpha_prod_t
 
     # 3. compute predicted original sample from predicted noise also called
-    # "predicted x_0" of formula (12) from https://huggingface.co/papers/2010.02502
+    # "predicted x_0" of formula (12) from https://arxiv.org/pdf/2010.02502.pdf
     pred_original_sample = (latents - beta_prod_t ** (0.5) * noise_pred) / alpha_prod_t ** (0.5)
 
     # 4. Clip "predicted x_0"
@@ -1740,10 +1682,10 @@ def compute_noise_ddim(scheduler, prev_latents, latents, timestep, noise_pred, e
     variance = scheduler._get_variance(timestep, prev_timestep)
     std_dev_t = eta * variance ** (0.5)
 
-    # 6. compute "direction pointing to x_t" of formula (12) from https://huggingface.co/papers/2010.02502
+    # 6. compute "direction pointing to x_t" of formula (12) from https://arxiv.org/pdf/2010.02502.pdf
     pred_sample_direction = (1 - alpha_prod_t_prev - std_dev_t**2) ** (0.5) * noise_pred
 
-    # modified so that updated xtm1 is returned as well (to avoid error accumulation)
+    # modifed so that updated xtm1 is returned as well (to avoid error accumulation)
     mu_xt = alpha_prod_t_prev ** (0.5) * pred_original_sample + pred_sample_direction
     if variance > 0.0:
         noise = (prev_latents - mu_xt) / (variance ** (0.5) * eta)

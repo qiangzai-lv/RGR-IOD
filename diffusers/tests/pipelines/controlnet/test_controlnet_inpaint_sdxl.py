@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 Harutatsu Akiyama, Jinbin Bai, and HuggingFace Inc.
+# Copyright 2024 Harutatsu Akiyama, Jinbin Bai, and HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -40,7 +40,7 @@ from diffusers.utils.import_utils import is_xformers_available
 from diffusers.utils.testing_utils import (
     enable_full_determinism,
     floats_tensor,
-    require_torch_accelerator,
+    require_torch_gpu,
     torch_device,
 )
 
@@ -77,8 +77,6 @@ class ControlNetPipelineSDXLFastTests(
             "masked_image_latents",
         }
     )
-
-    supports_dduf = False
 
     def get_dummy_components(self):
         torch.manual_seed(0)
@@ -245,7 +243,7 @@ class ControlNetPipelineSDXLFastTests(
     def test_inference_batch_single_identical(self):
         self._test_inference_batch_single_identical(expected_max_diff=2e-3)
 
-    @require_torch_accelerator
+    @require_torch_gpu
     def test_stable_diffusion_xl_offloads(self):
         pipes = []
         components = self.get_dummy_components()
@@ -254,12 +252,12 @@ class ControlNetPipelineSDXLFastTests(
 
         components = self.get_dummy_components()
         sd_pipe = self.pipeline_class(**components)
-        sd_pipe.enable_model_cpu_offload(device=torch_device)
+        sd_pipe.enable_model_cpu_offload()
         pipes.append(sd_pipe)
 
         components = self.get_dummy_components()
         sd_pipe = self.pipeline_class(**components)
-        sd_pipe.enable_sequential_cpu_offload(device=torch_device)
+        sd_pipe.enable_sequential_cpu_offload()
         pipes.append(sd_pipe)
 
         image_slices = []

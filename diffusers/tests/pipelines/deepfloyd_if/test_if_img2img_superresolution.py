@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 HuggingFace Inc.
+# Copyright 2024 HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,21 +22,7 @@ import torch
 from diffusers import IFImg2ImgSuperResolutionPipeline
 from diffusers.models.attention_processor import AttnAddedKVProcessor
 from diffusers.utils.import_utils import is_xformers_available
-from diffusers.utils.testing_utils import (
-    backend_empty_cache,
-    backend_max_memory_allocated,
-    backend_reset_max_memory_allocated,
-    backend_reset_peak_memory_stats,
-    floats_tensor,
-    load_numpy,
-    require_accelerator,
-    require_hf_hub_version_greater,
-    require_torch_accelerator,
-    require_transformers_version_greater,
-    skip_mps,
-    slow,
-    torch_device,
-)
+from diffusers.utils.testing_utils import floats_tensor, load_numpy, require_torch_gpu, skip_mps, slow, torch_device
 
 from ..pipeline_params import (
     TEXT_GUIDED_IMAGE_VARIATION_BATCH_PARAMS,
@@ -83,8 +69,10 @@ class IFImg2ImgSuperResolutionPipelineFastTests(PipelineTesterMixin, IFPipelineT
     def test_xformers_attention_forwardGenerator_pass(self):
         self._test_xformers_attention_forwardGenerator_pass(expected_max_diff=1e-3)
 
-    @unittest.skipIf(torch_device not in ["cuda", "xpu"], reason="float16 requires CUDA or XPU")
-    @require_accelerator
+    def test_save_load_optional_components(self):
+        self._test_save_load_optional_components()
+
+    @unittest.skipIf(torch_device != "cuda", reason="float16 requires CUDA")
     def test_save_load_float16(self):
         # Due to non-determinism in save load of the hf-internal-testing/tiny-random-t5 text encoder
         super().test_save_load_float16(expected_max_diff=1e-1)
@@ -100,30 +88,21 @@ class IFImg2ImgSuperResolutionPipelineFastTests(PipelineTesterMixin, IFPipelineT
             expected_max_diff=1e-2,
         )
 
-    @require_hf_hub_version_greater("0.26.5")
-    @require_transformers_version_greater("4.47.1")
-    def test_save_load_dduf(self):
-        super().test_save_load_dduf(atol=1e-2, rtol=1e-2)
-
-    @unittest.skip("Functionality is tested elsewhere.")
-    def test_save_load_optional_components(self):
-        pass
-
 
 @slow
-@require_torch_accelerator
+@require_torch_gpu
 class IFImg2ImgSuperResolutionPipelineSlowTests(unittest.TestCase):
     def setUp(self):
         # clean up the VRAM before each test
         super().setUp()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def tearDown(self):
         # clean up the VRAM after each test
         super().tearDown()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def test_if_img2img_superresolution(self):
         pipe = IFImg2ImgSuperResolutionPipeline.from_pretrained(
@@ -132,11 +111,11 @@ class IFImg2ImgSuperResolutionPipelineSlowTests(unittest.TestCase):
             torch_dtype=torch.float16,
         )
         pipe.unet.set_attn_processor(AttnAddedKVProcessor())
-        pipe.enable_model_cpu_offload(device=torch_device)
+        pipe.enable_model_cpu_offload()
 
-        backend_reset_max_memory_allocated(torch_device)
-        backend_empty_cache(torch_device)
-        backend_reset_peak_memory_stats(torch_device)
+        torch.cuda.reset_max_memory_allocated()
+        torch.cuda.empty_cache()
+        torch.cuda.reset_peak_memory_stats()
 
         generator = torch.Generator(device="cpu").manual_seed(0)
 
@@ -156,8 +135,7 @@ class IFImg2ImgSuperResolutionPipelineSlowTests(unittest.TestCase):
 
         assert image.shape == (256, 256, 3)
 
-        mem_bytes = backend_max_memory_allocated(torch_device)
-
+        mem_bytes = torch.cuda.max_memory_allocated()
         assert mem_bytes < 12 * 10**9
 
         expected_image = load_numpy(

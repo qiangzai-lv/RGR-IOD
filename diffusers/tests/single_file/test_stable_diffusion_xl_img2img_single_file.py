@@ -9,12 +9,10 @@ from diffusers import (
 )
 from diffusers.utils import load_image
 from diffusers.utils.testing_utils import (
-    backend_empty_cache,
     enable_full_determinism,
     numpy_cosine_similarity_distance,
-    require_torch_accelerator,
+    require_torch_gpu,
     slow,
-    torch_device,
 )
 
 from .single_file_testing_utils import SDXLSingleFileTesterMixin
@@ -24,7 +22,7 @@ enable_full_determinism()
 
 
 @slow
-@require_torch_accelerator
+@require_torch_gpu
 class StableDiffusionXLImg2ImgPipelineSingleFileSlowTests(unittest.TestCase, SDXLSingleFileTesterMixin):
     pipeline_class = StableDiffusionXLImg2ImgPipeline
     ckpt_path = "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/sd_xl_base_1.0.safetensors"
@@ -36,12 +34,12 @@ class StableDiffusionXLImg2ImgPipelineSingleFileSlowTests(unittest.TestCase, SDX
     def setUp(self):
         super().setUp()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def tearDown(self):
         super().tearDown()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def get_inputs(self, device, generator_device="cpu", dtype=torch.float32, seed=0):
         generator = torch.Generator(device=generator_device).manual_seed(seed)
@@ -65,7 +63,7 @@ class StableDiffusionXLImg2ImgPipelineSingleFileSlowTests(unittest.TestCase, SDX
 
 
 @slow
-@require_torch_accelerator
+@require_torch_gpu
 class StableDiffusionXLImg2ImgRefinerPipelineSingleFileSlowTests(unittest.TestCase):
     pipeline_class = StableDiffusionXLImg2ImgPipeline
     ckpt_path = (
@@ -85,7 +83,7 @@ class StableDiffusionXLImg2ImgRefinerPipelineSingleFileSlowTests(unittest.TestCa
         pipe = self.pipeline_class.from_pretrained(self.repo_id, torch_dtype=torch.float16)
         pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
         pipe.unet.set_default_attn_processor()
-        pipe.enable_model_cpu_offload(device=torch_device)
+        pipe.enable_model_cpu_offload()
 
         generator = torch.Generator(device="cpu").manual_seed(0)
         image = pipe(
@@ -95,7 +93,7 @@ class StableDiffusionXLImg2ImgRefinerPipelineSingleFileSlowTests(unittest.TestCa
         pipe_single_file = self.pipeline_class.from_single_file(self.ckpt_path, torch_dtype=torch.float16)
         pipe_single_file.scheduler = DDIMScheduler.from_config(pipe_single_file.scheduler.config)
         pipe_single_file.unet.set_default_attn_processor()
-        pipe_single_file.enable_model_cpu_offload(device=torch_device)
+        pipe_single_file.enable_model_cpu_offload()
 
         generator = torch.Generator(device="cpu").manual_seed(0)
         image_single_file = pipe_single_file(

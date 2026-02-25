@@ -1,4 +1,4 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
+# Copyright 2024 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -387,6 +387,9 @@ class StableCascadeUNet(ModelMixin, ConfigMixin, FromOriginalModelMixin):
 
         self.gradient_checkpointing = False
 
+    def _set_gradient_checkpointing(self, value=False):
+        self.gradient_checkpointing = value
+
     def _init_weights(self, m):
         if isinstance(m, (nn.Conv2d, nn.Linear)):
             torch.nn.init.xavier_uniform_(m.weight)
@@ -452,19 +455,30 @@ class StableCascadeUNet(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         level_outputs = []
         block_group = zip(self.down_blocks, self.down_downscalers, self.down_repeat_mappers)
 
-        if torch.is_grad_enabled() and self.gradient_checkpointing:
+        if self.training and self.gradient_checkpointing:
+
+            def create_custom_forward(module):
+                def custom_forward(*inputs):
+                    return module(*inputs)
+
+                return custom_forward
+
             for down_block, downscaler, repmap in block_group:
                 x = downscaler(x)
                 for i in range(len(repmap) + 1):
                     for block in down_block:
                         if isinstance(block, SDCascadeResBlock):
-                            x = self._gradient_checkpointing_func(block, x)
+                            x = torch.utils.checkpoint.checkpoint(create_custom_forward(block), x, use_reentrant=False)
                         elif isinstance(block, SDCascadeAttnBlock):
-                            x = self._gradient_checkpointing_func(block, x, clip)
+                            x = torch.utils.checkpoint.checkpoint(
+                                create_custom_forward(block), x, clip, use_reentrant=False
+                            )
                         elif isinstance(block, SDCascadeTimestepBlock):
-                            x = self._gradient_checkpointing_func(block, x, r_embed)
+                            x = torch.utils.checkpoint.checkpoint(
+                                create_custom_forward(block), x, r_embed, use_reentrant=False
+                            )
                         else:
-                            x = self._gradient_checkpointing_func(block)
+                            x = torch.utils.checkpoint.checkpoint(create_custom_forward(block), use_reentrant=False)
                     if i < len(repmap):
                         x = repmap[i](x)
                 level_outputs.insert(0, x)
@@ -490,7 +504,14 @@ class StableCascadeUNet(ModelMixin, ConfigMixin, FromOriginalModelMixin):
         x = level_outputs[0]
         block_group = zip(self.up_blocks, self.up_upscalers, self.up_repeat_mappers)
 
-        if torch.is_grad_enabled() and self.gradient_checkpointing:
+        if self.training and self.gradient_checkpointing:
+
+            def create_custom_forward(module):
+                def custom_forward(*inputs):
+                    return module(*inputs)
+
+                return custom_forward
+
             for i, (up_block, upscaler, repmap) in enumerate(block_group):
                 for j in range(len(repmap) + 1):
                     for k, block in enumerate(up_block):
@@ -502,13 +523,19 @@ class StableCascadeUNet(ModelMixin, ConfigMixin, FromOriginalModelMixin):
                                     x.float(), skip.shape[-2:], mode="bilinear", align_corners=True
                                 )
                                 x = x.to(orig_type)
-                            x = self._gradient_checkpointing_func(block, x, skip)
+                            x = torch.utils.checkpoint.checkpoint(
+                                create_custom_forward(block), x, skip, use_reentrant=False
+                            )
                         elif isinstance(block, SDCascadeAttnBlock):
-                            x = self._gradient_checkpointing_func(block, x, clip)
+                            x = torch.utils.checkpoint.checkpoint(
+                                create_custom_forward(block), x, clip, use_reentrant=False
+                            )
                         elif isinstance(block, SDCascadeTimestepBlock):
-                            x = self._gradient_checkpointing_func(block, x, r_embed)
+                            x = torch.utils.checkpoint.checkpoint(
+                                create_custom_forward(block), x, r_embed, use_reentrant=False
+                            )
                         else:
-                            x = self._gradient_checkpointing_func(block, x)
+                            x = torch.utils.checkpoint.checkpoint(create_custom_forward(block), x, use_reentrant=False)
                     if j < len(repmap):
                         x = repmap[j](x)
                 x = upscaler(x)

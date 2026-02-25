@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 HuggingFace Inc.
+# Copyright 2024 HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -361,7 +361,7 @@ class SchedulerCommonTest(unittest.TestCase):
             if isinstance(t, torch.Tensor):
                 num_dims = len(sample.shape)
                 # pad t with 1s to match num_dims
-                t = t.reshape(-1, *(1,) * (num_dims - 1)).to(sample.device, dtype=sample.dtype)
+                t = t.reshape(-1, *(1,) * (num_dims - 1)).to(sample.device).to(sample.dtype)
 
             return sample * t / (t + 1)
 
@@ -722,7 +722,7 @@ class SchedulerCommonTest(unittest.TestCase):
                 scaled_sample = scheduler.scale_model_input(sample, 0.0)
             self.assertEqual(sample.shape, scaled_sample.shape)
 
-            noise = torch.randn(scaled_sample.shape).to(torch_device)
+            noise = torch.randn_like(scaled_sample).to(torch_device)
             t = scheduler.timesteps[5][None]
             noised = scheduler.add_noise(scaled_sample, noise, t)
             self.assertEqual(noised.shape, scaled_sample.shape)

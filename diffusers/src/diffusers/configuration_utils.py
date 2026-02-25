@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 The HuggingFace Inc. team.
+# Copyright 2024 The HuggingFace Inc. team.
 # Copyright (c) 2022, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,10 +24,10 @@ import os
 import re
 from collections import OrderedDict
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Tuple, Union
 
 import numpy as np
-from huggingface_hub import DDUFEntry, create_repo, hf_hub_download
+from huggingface_hub import create_repo, hf_hub_download
 from huggingface_hub.utils import (
     EntryNotFoundError,
     RepositoryNotFoundError,
@@ -35,7 +35,6 @@ from huggingface_hub.utils import (
     validate_hf_hub_args,
 )
 from requests import HTTPError
-from typing_extensions import Self
 
 from . import __version__
 from .utils import (
@@ -171,12 +170,11 @@ class ConfigMixin:
 
         if push_to_hub:
             commit_message = kwargs.pop("commit_message", None)
-            private = kwargs.pop("private", None)
+            private = kwargs.pop("private", False)
             create_pr = kwargs.pop("create_pr", False)
             token = kwargs.pop("token", None)
             repo_id = kwargs.pop("repo_id", save_directory.split(os.path.sep)[-1])
             repo_id = create_repo(repo_id, exist_ok=True, private=private, token=token).repo_id
-            subfolder = kwargs.pop("subfolder", None)
 
             self._upload_folder(
                 save_directory,
@@ -184,13 +182,10 @@ class ConfigMixin:
                 token=token,
                 commit_message=commit_message,
                 create_pr=create_pr,
-                subfolder=subfolder,
             )
 
     @classmethod
-    def from_config(
-        cls, config: Union[FrozenDict, Dict[str, Any]] = None, return_unused_kwargs=False, **kwargs
-    ) -> Union[Self, Tuple[Self, Dict[str, Any]]]:
+    def from_config(cls, config: Union[FrozenDict, Dict[str, Any]] = None, return_unused_kwargs=False, **kwargs):
         r"""
         Instantiate a Python class from a config dictionary.
 
@@ -352,7 +347,6 @@ class ConfigMixin:
         _ = kwargs.pop("mirror", None)
         subfolder = kwargs.pop("subfolder", None)
         user_agent = kwargs.pop("user_agent", {})
-        dduf_entries: Optional[Dict[str, DDUFEntry]] = kwargs.pop("dduf_entries", None)
 
         user_agent = {**user_agent, "file_type": "config"}
         user_agent = http_user_agent(user_agent)
@@ -364,15 +358,8 @@ class ConfigMixin:
                 "`self.config_name` is not defined. Note that one should not load a config from "
                 "`ConfigMixin`. Please make sure to define `config_name` in a class inheriting from `ConfigMixin`"
             )
-        # Custom path for now
-        if dduf_entries:
-            if subfolder is not None:
-                raise ValueError(
-                    "DDUF file only allow for 1 level of directory (e.g transformer/model1/model.safetentors is not allowed). "
-                    "Please check the DDUF structure"
-                )
-            config_file = cls._get_config_file_from_dduf(pretrained_model_name_or_path, dduf_entries)
-        elif os.path.isfile(pretrained_model_name_or_path):
+
+        if os.path.isfile(pretrained_model_name_or_path):
             config_file = pretrained_model_name_or_path
         elif os.path.isdir(pretrained_model_name_or_path):
             if subfolder is not None and os.path.isfile(
@@ -407,7 +394,7 @@ class ConfigMixin:
                 raise EnvironmentError(
                     f"{pretrained_model_name_or_path} is not a local folder and is not a valid model identifier"
                     " listed on 'https://huggingface.co/models'\nIf this is a private repository, make sure to pass a"
-                    " token having permission to this repo with `token` or log in with `hf auth login`."
+                    " token having permission to this repo with `token` or log in with `huggingface-cli login`."
                 )
             except RevisionNotFoundError:
                 raise EnvironmentError(
@@ -439,8 +426,10 @@ class ConfigMixin:
                     f"Otherwise, make sure '{pretrained_model_name_or_path}' is the correct path to a directory "
                     f"containing a {cls.config_name} file"
                 )
+
         try:
-            config_dict = cls._dict_from_json_file(config_file, dduf_entries=dduf_entries)
+            # Load config dict
+            config_dict = cls._dict_from_json_file(config_file)
 
             commit_hash = extract_commit_hash(config_file)
         except (json.JSONDecodeError, UnicodeDecodeError):
@@ -521,9 +510,6 @@ class ConfigMixin:
         # remove private attributes
         config_dict = {k: v for k, v in config_dict.items() if not k.startswith("_")}
 
-        # remove quantization_config
-        config_dict = {k: v for k, v in config_dict.items() if k != "quantization_config"}
-
         # 3. Create keyword arguments that will be passed to __init__ from expected keyword arguments
         init_dict = {}
         for key in expected_keys:
@@ -563,14 +549,9 @@ class ConfigMixin:
         return init_dict, unused_kwargs, hidden_config_dict
 
     @classmethod
-    def _dict_from_json_file(
-        cls, json_file: Union[str, os.PathLike], dduf_entries: Optional[Dict[str, DDUFEntry]] = None
-    ):
-        if dduf_entries:
-            text = dduf_entries[json_file].read_text()
-        else:
-            with open(json_file, "r", encoding="utf-8") as reader:
-                text = reader.read()
+    def _dict_from_json_file(cls, json_file: Union[str, os.PathLike]):
+        with open(json_file, "r", encoding="utf-8") as reader:
+            text = reader.read()
         return json.loads(text)
 
     def __repr__(self):
@@ -603,25 +584,12 @@ class ConfigMixin:
                 value = value.tolist()
             elif isinstance(value, Path):
                 value = value.as_posix()
-            elif hasattr(value, "to_dict") and callable(value.to_dict):
-                value = value.to_dict()
-            elif isinstance(value, list):
-                value = [to_json_saveable(v) for v in value]
             return value
-
-        if "quantization_config" in config_dict:
-            config_dict["quantization_config"] = (
-                config_dict.quantization_config.to_dict()
-                if not isinstance(config_dict.quantization_config, dict)
-                else config_dict.quantization_config
-            )
 
         config_dict = {k: to_json_saveable(v) for k, v in config_dict.items()}
         # Don't save "_ignore_files" or "_use_default_values"
         config_dict.pop("_ignore_files", None)
         config_dict.pop("_use_default_values", None)
-        # pop the `_pre_quantization_dtype` as torch.dtypes are not serializable.
-        _ = config_dict.pop("_pre_quantization_dtype", None)
 
         return json.dumps(config_dict, indent=2, sort_keys=True) + "\n"
 
@@ -635,20 +603,6 @@ class ConfigMixin:
         """
         with open(json_file_path, "w", encoding="utf-8") as writer:
             writer.write(self.to_json_string())
-
-    @classmethod
-    def _get_config_file_from_dduf(cls, pretrained_model_name_or_path: str, dduf_entries: Dict[str, DDUFEntry]):
-        # paths inside a DDUF file must always be "/"
-        config_file = (
-            cls.config_name
-            if pretrained_model_name_or_path == ""
-            else "/".join([pretrained_model_name_or_path, cls.config_name])
-        )
-        if config_file not in dduf_entries:
-            raise ValueError(
-                f"We did not manage to find the file {config_file} in the dduf file. We only have the following files {dduf_entries.keys()}"
-            )
-        return config_file
 
 
 def register_to_config(init):
@@ -763,7 +717,4 @@ class LegacyConfigMixin(ConfigMixin):
         # resolve remapping
         remapped_class = _fetch_remapped_cls_from_config(config, cls)
 
-        if remapped_class is cls:
-            return super(LegacyConfigMixin, remapped_class).from_config(config, return_unused_kwargs, **kwargs)
-        else:
-            return remapped_class.from_config(config, return_unused_kwargs, **kwargs)
+        return remapped_class.from_config(config, return_unused_kwargs, **kwargs)

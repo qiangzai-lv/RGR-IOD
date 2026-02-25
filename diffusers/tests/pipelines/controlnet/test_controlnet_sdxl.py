@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 HuggingFace Inc.
+# Copyright 2024 HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -35,10 +35,9 @@ from diffusers.models.unets.unet_2d_blocks import UNetMidBlock2D
 from diffusers.pipelines.controlnet.pipeline_controlnet import MultiControlNetModel
 from diffusers.utils.import_utils import is_xformers_available
 from diffusers.utils.testing_utils import (
-    backend_empty_cache,
     enable_full_determinism,
     load_image,
-    require_torch_accelerator,
+    require_torch_gpu,
     slow,
     torch_device,
 )
@@ -55,6 +54,7 @@ from ..test_pipelines_common import (
     PipelineKarrasSchedulerTesterMixin,
     PipelineLatentTesterMixin,
     PipelineTesterMixin,
+    SDXLOptionalComponentsTesterMixin,
 )
 
 
@@ -66,6 +66,7 @@ class StableDiffusionXLControlNetPipelineFastTests(
     PipelineLatentTesterMixin,
     PipelineKarrasSchedulerTesterMixin,
     PipelineTesterMixin,
+    SDXLOptionalComponentsTesterMixin,
     unittest.TestCase,
 ):
     pipeline_class = StableDiffusionXLControlNetPipeline
@@ -73,8 +74,6 @@ class StableDiffusionXLControlNetPipelineFastTests(
     batch_params = TEXT_TO_IMAGE_BATCH_PARAMS
     image_params = IMAGE_TO_IMAGE_IMAGE_PARAMS
     image_latents_params = TEXT_TO_IMAGE_IMAGE_PARAMS
-    test_layerwise_casting = True
-    test_group_offloading = True
 
     def get_dummy_components(self, time_cond_proj_dim=None):
         torch.manual_seed(0)
@@ -210,11 +209,10 @@ class StableDiffusionXLControlNetPipelineFastTests(
     def test_inference_batch_single_identical(self):
         self._test_inference_batch_single_identical(expected_max_diff=2e-3)
 
-    @unittest.skip("We test this functionality elsewhere already.")
     def test_save_load_optional_components(self):
-        pass
+        self._test_save_load_optional_components()
 
-    @require_torch_accelerator
+    @require_torch_gpu
     def test_stable_diffusion_xl_offloads(self):
         pipes = []
         components = self.get_dummy_components()
@@ -223,12 +221,12 @@ class StableDiffusionXLControlNetPipelineFastTests(
 
         components = self.get_dummy_components()
         sd_pipe = self.pipeline_class(**components)
-        sd_pipe.enable_model_cpu_offload(device=torch_device)
+        sd_pipe.enable_model_cpu_offload()
         pipes.append(sd_pipe)
 
         components = self.get_dummy_components()
         sd_pipe = self.pipeline_class(**components)
-        sd_pipe.enable_sequential_cpu_offload(device=torch_device)
+        sd_pipe.enable_sequential_cpu_offload()
         pipes.append(sd_pipe)
 
         image_slices = []
@@ -295,6 +293,45 @@ class StableDiffusionXLControlNetPipelineFastTests(
 
         # ensure the results are not equal
         assert np.abs(image_slice_1.flatten() - image_slice_3.flatten()).max() > 1e-4
+
+    # Copied from test_stable_diffusion_xl.py
+    def test_stable_diffusion_xl_prompt_embeds(self):
+        components = self.get_dummy_components()
+        sd_pipe = self.pipeline_class(**components)
+        sd_pipe = sd_pipe.to(torch_device)
+        sd_pipe = sd_pipe.to(torch_device)
+        sd_pipe.set_progress_bar_config(disable=None)
+
+        # forward without prompt embeds
+        inputs = self.get_dummy_inputs(torch_device)
+        inputs["prompt"] = 2 * [inputs["prompt"]]
+        inputs["num_images_per_prompt"] = 2
+
+        output = sd_pipe(**inputs)
+        image_slice_1 = output.images[0, -3:, -3:, -1]
+
+        # forward with prompt embeds
+        inputs = self.get_dummy_inputs(torch_device)
+        prompt = 2 * [inputs.pop("prompt")]
+
+        (
+            prompt_embeds,
+            negative_prompt_embeds,
+            pooled_prompt_embeds,
+            negative_pooled_prompt_embeds,
+        ) = sd_pipe.encode_prompt(prompt)
+
+        output = sd_pipe(
+            **inputs,
+            prompt_embeds=prompt_embeds,
+            negative_prompt_embeds=negative_prompt_embeds,
+            pooled_prompt_embeds=pooled_prompt_embeds,
+            negative_pooled_prompt_embeds=negative_pooled_prompt_embeds,
+        )
+        image_slice_2 = output.images[0, -3:, -3:, -1]
+
+        # make sure that it's equal
+        assert np.abs(image_slice_1.flatten() - image_slice_2.flatten()).max() < 1e-4
 
     def test_controlnet_sdxl_guess(self):
         device = "cpu"
@@ -443,14 +480,12 @@ class StableDiffusionXLControlNetPipelineFastTests(
 
 
 class StableDiffusionXLMultiControlNetPipelineFastTests(
-    PipelineTesterMixin, PipelineKarrasSchedulerTesterMixin, unittest.TestCase
+    PipelineTesterMixin, PipelineKarrasSchedulerTesterMixin, SDXLOptionalComponentsTesterMixin, unittest.TestCase
 ):
     pipeline_class = StableDiffusionXLControlNetPipeline
     params = TEXT_TO_IMAGE_PARAMS
     batch_params = TEXT_TO_IMAGE_BATCH_PARAMS
     image_params = frozenset([])  # TO_DO: add image_params once refactored VaeImageProcessor.preprocess
-
-    supports_dduf = False
 
     def get_dummy_components(self):
         torch.manual_seed(0)
@@ -645,20 +680,17 @@ class StableDiffusionXLMultiControlNetPipelineFastTests(
     def test_inference_batch_single_identical(self):
         self._test_inference_batch_single_identical(expected_max_diff=2e-3)
 
-    @unittest.skip("We test this functionality elsewhere already.")
     def test_save_load_optional_components(self):
-        pass
+        return self._test_save_load_optional_components()
 
 
 class StableDiffusionXLMultiControlNetOneModelPipelineFastTests(
-    PipelineKarrasSchedulerTesterMixin, PipelineTesterMixin, unittest.TestCase
+    PipelineKarrasSchedulerTesterMixin, PipelineTesterMixin, SDXLOptionalComponentsTesterMixin, unittest.TestCase
 ):
     pipeline_class = StableDiffusionXLControlNetPipeline
     params = TEXT_TO_IMAGE_PARAMS
     batch_params = TEXT_TO_IMAGE_BATCH_PARAMS
     image_params = frozenset([])  # TO_DO: add image_params once refactored VaeImageProcessor.preprocess
-
-    supports_dduf = False
 
     def get_dummy_components(self):
         torch.manual_seed(0)
@@ -823,10 +855,6 @@ class StableDiffusionXLMultiControlNetOneModelPipelineFastTests(
     def test_attention_slicing_forward_pass(self):
         return self._test_attention_slicing_forward_pass(expected_max_diff=2e-3)
 
-    @unittest.skip("We test this functionality elsewhere already.")
-    def test_save_load_optional_components(self):
-        pass
-
     @unittest.skipIf(
         torch_device != "cuda" or not is_xformers_available(),
         reason="XFormers attention is only available with CUDA and `xformers` installed",
@@ -836,6 +864,9 @@ class StableDiffusionXLMultiControlNetOneModelPipelineFastTests(
 
     def test_inference_batch_single_identical(self):
         self._test_inference_batch_single_identical(expected_max_diff=2e-3)
+
+    def test_save_load_optional_components(self):
+        self._test_save_load_optional_components()
 
     def test_negative_conditions(self):
         components = self.get_dummy_components()
@@ -858,17 +889,17 @@ class StableDiffusionXLMultiControlNetOneModelPipelineFastTests(
 
 
 @slow
-@require_torch_accelerator
+@require_torch_gpu
 class ControlNetSDXLPipelineSlowTests(unittest.TestCase):
     def setUp(self):
         super().setUp()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def tearDown(self):
         super().tearDown()
         gc.collect()
-        backend_empty_cache(torch_device)
+        torch.cuda.empty_cache()
 
     def test_canny(self):
         controlnet = ControlNetModel.from_pretrained("diffusers/controlnet-canny-sdxl-1.0")
@@ -876,7 +907,7 @@ class ControlNetSDXLPipelineSlowTests(unittest.TestCase):
         pipe = StableDiffusionXLControlNetPipeline.from_pretrained(
             "stabilityai/stable-diffusion-xl-base-1.0", controlnet=controlnet
         )
-        pipe.enable_sequential_cpu_offload(device=torch_device)
+        pipe.enable_sequential_cpu_offload()
         pipe.set_progress_bar_config(disable=None)
 
         generator = torch.Generator(device="cpu").manual_seed(0)
@@ -899,7 +930,7 @@ class ControlNetSDXLPipelineSlowTests(unittest.TestCase):
         pipe = StableDiffusionXLControlNetPipeline.from_pretrained(
             "stabilityai/stable-diffusion-xl-base-1.0", controlnet=controlnet
         )
-        pipe.enable_sequential_cpu_offload(device=torch_device)
+        pipe.enable_sequential_cpu_offload()
         pipe.set_progress_bar_config(disable=None)
 
         generator = torch.Generator(device="cpu").manual_seed(0)
@@ -988,7 +1019,7 @@ class StableDiffusionSSD1BControlNetPipelineFastTests(StableDiffusionXLControlNe
         )
 
         controlnet = ControlNetModel.from_unet(unet, conditioning_channels=4)
-        assert type(controlnet.mid_block) is UNetMidBlock2D
+        assert type(controlnet.mid_block) == UNetMidBlock2D
         assert controlnet.conditioning_channels == 4
 
     def get_dummy_components(self, time_cond_proj_dim=None):

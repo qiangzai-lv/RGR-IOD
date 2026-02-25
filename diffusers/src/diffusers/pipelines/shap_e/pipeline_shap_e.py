@@ -1,4 +1,4 @@
-# Copyright 2025 Open AI and The HuggingFace Team. All rights reserved.
+# Copyright 2024 Open AI and The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -25,7 +25,6 @@ from ...models import PriorTransformer
 from ...schedulers import HeunDiscreteScheduler
 from ...utils import (
     BaseOutput,
-    is_torch_xla_available,
     logging,
     replace_example_docstring,
 )
@@ -34,15 +33,7 @@ from ..pipeline_utils import DiffusionPipeline
 from .renderer import ShapERenderer
 
 
-if is_torch_xla_available():
-    import torch_xla.core.xla_model as xm
-
-    XLA_AVAILABLE = True
-else:
-    XLA_AVAILABLE = False
-
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
-
 
 EXAMPLE_DOC_STRING = """
     Examples:
@@ -299,9 +290,6 @@ class ShapEPipeline(DiffusionPipeline):
                 timestep=t,
                 sample=latents,
             ).prev_sample
-
-            if XLA_AVAILABLE:
-                xm.mark_step()
 
         # Offload all models
         self.maybe_free_model_hooks()

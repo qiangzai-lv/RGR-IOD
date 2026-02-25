@@ -1,4 +1,4 @@
-# Copyright 2025 The HuggingFace Team. All rights reserved.
+# Copyright 2024 The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -217,7 +217,7 @@ class MidResTemporalBlock1D(nn.Module):
         if self.upsample:
             hidden_states = self.upsample(hidden_states)
         if self.downsample:
-            hidden_states = self.downsample(hidden_states)
+            self.downsample = self.downsample(hidden_states)
 
         return hidden_states
 

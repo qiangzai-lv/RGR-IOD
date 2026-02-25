@@ -265,9 +265,3 @@ class DPMSolverMultistepSchedulerTest(SchedulerCommonTest):
 
             scheduler.set_timesteps(scheduler.config.num_train_timesteps)
             assert len(scheduler.timesteps.unique()) == scheduler.num_inference_steps
-
-    def test_beta_sigmas(self):
-        self.check_over_configs(use_beta_sigmas=True)
-
-    def test_exponential_sigmas(self):
-        self.check_over_configs(use_exponential_sigmas=True)

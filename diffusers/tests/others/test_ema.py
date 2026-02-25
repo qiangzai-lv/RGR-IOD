@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 HuggingFace Inc.
+# Copyright 2024 HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -58,26 +58,6 @@ class EMAModelTests(unittest.TestCase):
             updated_state_dict.update({k: updated_param})
         unet.load_state_dict(updated_state_dict)
         return unet
-
-    def test_from_pretrained(self):
-        # Save the model parameters to a temporary directory
-        unet, ema_unet = self.get_models()
-        with tempfile.TemporaryDirectory() as tmpdir:
-            ema_unet.save_pretrained(tmpdir)
-
-            # Load the EMA model from the saved directory
-            loaded_ema_unet = EMAModel.from_pretrained(tmpdir, model_cls=UNet2DConditionModel, foreach=False)
-            loaded_ema_unet.to(torch_device)
-
-        # Check that the shadow parameters of the loaded model match the original EMA model
-        for original_param, loaded_param in zip(ema_unet.shadow_params, loaded_ema_unet.shadow_params):
-            assert torch.allclose(original_param, loaded_param, atol=1e-4)
-
-        # Verify that the optimization step is also preserved
-        assert loaded_ema_unet.optimization_step == ema_unet.optimization_step
-
-        # Check the decay value
-        assert loaded_ema_unet.decay == ema_unet.decay
 
     def test_optimization_steps_updated(self):
         unet, ema_unet = self.get_models()
@@ -213,26 +193,6 @@ class EMAModelTestsForeach(unittest.TestCase):
             updated_state_dict.update({k: updated_param})
         unet.load_state_dict(updated_state_dict)
         return unet
-
-    def test_from_pretrained(self):
-        # Save the model parameters to a temporary directory
-        unet, ema_unet = self.get_models()
-        with tempfile.TemporaryDirectory() as tmpdir:
-            ema_unet.save_pretrained(tmpdir)
-
-            # Load the EMA model from the saved directory
-            loaded_ema_unet = EMAModel.from_pretrained(tmpdir, model_cls=UNet2DConditionModel, foreach=True)
-            loaded_ema_unet.to(torch_device)
-
-        # Check that the shadow parameters of the loaded model match the original EMA model
-        for original_param, loaded_param in zip(ema_unet.shadow_params, loaded_ema_unet.shadow_params):
-            assert torch.allclose(original_param, loaded_param, atol=1e-4)
-
-        # Verify that the optimization step is also preserved
-        assert loaded_ema_unet.optimization_step == ema_unet.optimization_step
-
-        # Check the decay value
-        assert loaded_ema_unet.decay == ema_unet.decay
 
     def test_optimization_steps_updated(self):
         unet, ema_unet = self.get_models()

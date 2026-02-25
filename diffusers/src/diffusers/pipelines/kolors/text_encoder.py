@@ -1,4 +1,4 @@
-# Copyright 2025 ChatGLM3-6B Model Team, Kwai-Kolors Team and The HuggingFace Team. All rights reserved.
+# Copyright 2024 ChatGLM3-6B Model Team, Kwai-Kolors Team and The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -102,6 +102,13 @@ class RMSNorm(torch.nn.Module):
         hidden_states = hidden_states * torch.rsqrt(variance + self.eps)
 
         return (self.weight * hidden_states).to(input_dtype)
+
+
+def _config_to_kwargs(args):
+    common_kwargs = {
+        "dtype": args.torch_dtype,
+    }
+    return common_kwargs
 
 
 class CoreAttention(torch.nn.Module):
@@ -307,6 +314,7 @@ class SelfAttention(torch.nn.Module):
             self.qkv_hidden_size,
             bias=config.add_bias_linear or config.add_qkv_bias,
             device=device,
+            **_config_to_kwargs(config),
         )
 
         self.core_attention = CoreAttention(config, self.layer_number)
@@ -317,6 +325,7 @@ class SelfAttention(torch.nn.Module):
             config.hidden_size,
             bias=config.add_bias_linear,
             device=device,
+            **_config_to_kwargs(config),
         )
 
     def _allocate_memory(self, inference_max_sequence_len, batch_size, device=None, dtype=None):
@@ -434,12 +443,13 @@ class MLP(torch.nn.Module):
 
         self.add_bias = config.add_bias_linear
 
-        # Project to 4h. If using swiglu double the output width, see https://huggingface.co/papers/2002.05202
+        # Project to 4h. If using swiglu double the output width, see https://arxiv.org/pdf/2002.05202.pdf
         self.dense_h_to_4h = nn.Linear(
             config.hidden_size,
             config.ffn_hidden_size * 2,
             bias=self.add_bias,
             device=device,
+            **_config_to_kwargs(config),
         )
 
         def swiglu(x):
@@ -449,7 +459,9 @@ class MLP(torch.nn.Module):
         self.activation_func = swiglu
 
         # Project back to h.
-        self.dense_4h_to_h = nn.Linear(config.ffn_hidden_size, config.hidden_size, bias=self.add_bias, device=device)
+        self.dense_4h_to_h = nn.Linear(
+            config.ffn_hidden_size, config.hidden_size, bias=self.add_bias, device=device, **_config_to_kwargs(config)
+        )
 
     def forward(self, hidden_states):
         # [s, b, 4hp]
@@ -476,14 +488,18 @@ class GLMBlock(torch.nn.Module):
 
         LayerNormFunc = RMSNorm if config.rmsnorm else LayerNorm
         # Layernorm on the input data.
-        self.input_layernorm = LayerNormFunc(config.hidden_size, eps=config.layernorm_epsilon, device=device)
+        self.input_layernorm = LayerNormFunc(
+            config.hidden_size, eps=config.layernorm_epsilon, device=device, dtype=config.torch_dtype
+        )
 
         # Self attention.
         self.self_attention = SelfAttention(config, layer_number, device=device)
         self.hidden_dropout = config.hidden_dropout
 
         # Layernorm on the attention output
-        self.post_attention_layernorm = LayerNormFunc(config.hidden_size, eps=config.layernorm_epsilon, device=device)
+        self.post_attention_layernorm = LayerNormFunc(
+            config.hidden_size, eps=config.layernorm_epsilon, device=device, dtype=config.torch_dtype
+        )
 
         # MLP
         self.mlp = MLP(config, device=device)
@@ -553,7 +569,9 @@ class GLMTransformer(torch.nn.Module):
         if self.post_layer_norm:
             LayerNormFunc = RMSNorm if config.rmsnorm else LayerNorm
             # Final layer norm before output.
-            self.final_layernorm = LayerNormFunc(config.hidden_size, eps=config.layernorm_epsilon, device=device)
+            self.final_layernorm = LayerNormFunc(
+                config.hidden_size, eps=config.layernorm_epsilon, device=device, dtype=config.torch_dtype
+            )
 
         self.gradient_checkpointing = False
 
@@ -572,7 +590,7 @@ class GLMTransformer(torch.nn.Module):
         if not kv_caches:
             kv_caches = [None for _ in range(self.num_layers)]
         presents = () if use_cache else None
-        if torch.is_grad_enabled() and self.gradient_checkpointing:
+        if self.gradient_checkpointing and self.training:
             if use_cache:
                 logger.warning_once(
                     "`use_cache=True` is incompatible with gradient checkpointing. Setting `use_cache=False`..."
@@ -586,8 +604,8 @@ class GLMTransformer(torch.nn.Module):
                 all_hidden_states = all_hidden_states + (hidden_states,)
 
             layer = self._get_layer(index)
-            if torch.is_grad_enabled() and self.gradient_checkpointing:
-                layer_ret = self._gradient_checkpointing_func(
+            if self.gradient_checkpointing and self.training:
+                layer_ret = torch.utils.checkpoint.checkpoint(
                     layer, hidden_states, attention_mask, rotary_pos_emb, kv_caches[index], use_cache
                 )
             else:
@@ -648,6 +666,10 @@ class ChatGLMPreTrainedModel(PreTrainedModel):
         position_ids = torch.arange(seq_length, dtype=torch.long, device=device).unsqueeze(0).repeat(batch_size, 1)
         return position_ids
 
+    def _set_gradient_checkpointing(self, module, value=False):
+        if isinstance(module, GLMTransformer):
+            module.gradient_checkpointing = value
+
 
 def default_init(cls, *args, **kwargs):
     return cls(*args, **kwargs)
@@ -661,14 +683,16 @@ class Embedding(torch.nn.Module):
 
         self.hidden_size = config.hidden_size
         # Word embeddings (parallel).
-        self.word_embeddings = nn.Embedding(config.padded_vocab_size, self.hidden_size, device=device)
+        self.word_embeddings = nn.Embedding(
+            config.padded_vocab_size, self.hidden_size, dtype=config.torch_dtype, device=device
+        )
         self.fp32_residual_connection = config.fp32_residual_connection
 
     def forward(self, input_ids):
         # Embeddings.
         words_embeddings = self.word_embeddings(input_ids)
         embeddings = words_embeddings
-        # Data format change to avoid explicit transposes : [b s h] --> [s b h].
+        # Data format change to avoid explicit tranposes : [b s h] --> [s b h].
         embeddings = embeddings.transpose(0, 1).contiguous()
         # If the input flag for fp32 residual connection is set, convert for float.
         if self.fp32_residual_connection:
@@ -764,13 +788,16 @@ class ChatGLMModel(ChatGLMPreTrainedModel):
             config.hidden_size // config.num_attention_heads if config.kv_channels is None else config.kv_channels
         )
 
-        self.rotary_pos_emb = RotaryEmbedding(rotary_dim // 2, original_impl=config.original_rope, device=device)
+        self.rotary_pos_emb = RotaryEmbedding(
+            rotary_dim // 2, original_impl=config.original_rope, device=device, dtype=config.torch_dtype
+        )
         self.encoder = init_method(GLMTransformer, config, **init_kwargs)
         self.output_layer = init_method(
             nn.Linear,
             config.hidden_size,
             config.padded_vocab_size,
             bias=False,
+            dtype=config.torch_dtype,
             **init_kwargs,
         )
         self.pre_seq_len = config.pre_seq_len

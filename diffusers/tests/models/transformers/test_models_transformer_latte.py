@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 HuggingFace Inc.
+# Copyright 2024 HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -86,7 +86,3 @@ class LatteTransformerTests(ModelTesterMixin, unittest.TestCase):
         super().test_output(
             expected_output_shape=(self.dummy_input[self.main_input_name].shape[0],) + self.output_shape
         )
-
-    def test_gradient_checkpointing_is_applied(self):
-        expected_set = {"LatteTransformer3DModel"}
-        super().test_gradient_checkpointing_is_applied(expected_set=expected_set)

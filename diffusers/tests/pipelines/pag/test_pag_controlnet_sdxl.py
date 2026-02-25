@@ -1,5 +1,5 @@
 # coding=utf-8
-# Copyright 2025 HuggingFace Inc.
+# Copyright 2024 HuggingFace Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -42,6 +42,7 @@ from ..test_pipelines_common import (
     PipelineFromPipeTesterMixin,
     PipelineLatentTesterMixin,
     PipelineTesterMixin,
+    SDXLOptionalComponentsTesterMixin,
 )
 
 
@@ -53,6 +54,7 @@ class StableDiffusionXLControlNetPAGPipelineFastTests(
     IPAdapterTesterMixin,
     PipelineLatentTesterMixin,
     PipelineFromPipeTesterMixin,
+    SDXLOptionalComponentsTesterMixin,
     unittest.TestCase,
 ):
     pipeline_class = StableDiffusionXLControlNetPAGPipeline
@@ -187,9 +189,9 @@ class StableDiffusionXLControlNetPAGPipelineFastTests(
 
         inputs = self.get_dummy_inputs(device)
         del inputs["pag_scale"]
-        assert "pag_scale" not in inspect.signature(pipe_sd.__call__).parameters, (
-            f"`pag_scale` should not be a call parameter of the base pipeline {pipe_sd.__class__.__name__}."
-        )
+        assert (
+            "pag_scale" not in inspect.signature(pipe_sd.__call__).parameters
+        ), f"`pag_scale` should not be a call parameter of the base pipeline {pipe_sd.__class__.__name__}."
         out = pipe_sd(**inputs).images[0, -3:, -3:, -1]
 
         # pag disabled with pag_scale=0.0
@@ -211,6 +213,9 @@ class StableDiffusionXLControlNetPAGPipelineFastTests(
 
         assert np.abs(out.flatten() - out_pag_disabled.flatten()).max() < 1e-3
         assert np.abs(out.flatten() - out_pag_enabled.flatten()).max() > 1e-3
+
+    def test_save_load_optional_components(self):
+        self._test_save_load_optional_components()
 
     def test_pag_cfg(self):
         device = "cpu"  # ensure determinism for the device-dependent torch.Generator
@@ -258,7 +263,3 @@ class StableDiffusionXLControlNetPAGPipelineFastTests(
 
         max_diff = np.abs(image_slice.flatten() - expected_slice).max()
         assert max_diff < 1e-3, f"output is different from expected, {image_slice.flatten()}"
-
-    @unittest.skip("We test this functionality elsewhere already.")
-    def test_save_load_optional_components(self):
-        pass

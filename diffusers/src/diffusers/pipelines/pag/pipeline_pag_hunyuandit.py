@@ -1,4 +1,4 @@
-# Copyright 2025 HunyuanDiT Authors and The HuggingFace Team. All rights reserved.
+# Copyright 2024 HunyuanDiT Authors and The HuggingFace Team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -128,21 +128,9 @@ def get_resize_crop_region_for_grid(src, tgt_size):
 
 # Copied from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.rescale_noise_cfg
 def rescale_noise_cfg(noise_cfg, noise_pred_text, guidance_rescale=0.0):
-    r"""
-    Rescales `noise_cfg` tensor based on `guidance_rescale` to improve image quality and fix overexposure. Based on
-    Section 3.4 from [Common Diffusion Noise Schedules and Sample Steps are
-    Flawed](https://huggingface.co/papers/2305.08891).
-
-    Args:
-        noise_cfg (`torch.Tensor`):
-            The predicted noise tensor for the guided diffusion process.
-        noise_pred_text (`torch.Tensor`):
-            The predicted noise tensor for the text-guided diffusion process.
-        guidance_rescale (`float`, *optional*, defaults to 0.0):
-            A rescale factor applied to the noise predictions.
-
-    Returns:
-        noise_cfg (`torch.Tensor`): The rescaled noise prediction tensor.
+    """
+    Rescale `noise_cfg` according to `guidance_rescale`. Based on findings of [Common Diffusion Noise Schedules and
+    Sample Steps are Flawed](https://arxiv.org/pdf/2305.08891.pdf). See Section 3.4
     """
     std_text = noise_pred_text.std(dim=list(range(1, noise_pred_text.ndim)), keepdim=True)
     std_cfg = noise_cfg.std(dim=list(range(1, noise_cfg.ndim)), keepdim=True)
@@ -245,7 +233,9 @@ class HunyuanDiTPAGPipeline(DiffusionPipeline, PAGMixin):
                 " checker. If you do not want to use the safety checker, you can pass `'safety_checker=None'` instead."
             )
 
-        self.vae_scale_factor = 2 ** (len(self.vae.config.block_out_channels) - 1) if getattr(self, "vae", None) else 8
+        self.vae_scale_factor = (
+            2 ** (len(self.vae.config.block_out_channels) - 1) if hasattr(self, "vae") and self.vae is not None else 8
+        )
         self.image_processor = VaeImageProcessor(vae_scale_factor=self.vae_scale_factor)
         self.register_to_config(requires_safety_checker=requires_safety_checker)
         self.default_sample_size = (
@@ -443,7 +433,7 @@ class HunyuanDiTPAGPipeline(DiffusionPipeline, PAGMixin):
     def prepare_extra_step_kwargs(self, generator, eta):
         # prepare extra kwargs for the scheduler step, since not all schedulers have the same signature
         # eta (η) is only used with the DDIMScheduler, it will be ignored for other schedulers.
-        # eta corresponds to η in DDIM paper: https://huggingface.co/papers/2010.02502
+        # eta corresponds to η in DDIM paper: https://arxiv.org/abs/2010.02502
         # and should be between [0, 1]
 
         accepts_eta = "eta" in set(inspect.signature(self.scheduler.step).parameters.keys())
@@ -566,7 +556,7 @@ class HunyuanDiTPAGPipeline(DiffusionPipeline, PAGMixin):
         return self._guidance_rescale
 
     # here `guidance_scale` is defined analog to the guidance weight `w` of equation (2)
-    # of the Imagen paper: https://huggingface.co/papers/2205.11487 . `guidance_scale = 1`
+    # of the Imagen paper: https://arxiv.org/pdf/2205.11487.pdf . `guidance_scale = 1`
     # corresponds to doing no classifier free guidance.
     @property
     def do_classifier_free_guidance(self):
@@ -638,8 +628,8 @@ class HunyuanDiTPAGPipeline(DiffusionPipeline, PAGMixin):
             num_images_per_prompt (`int`, *optional*, defaults to 1):
                 The number of images to generate per prompt.
             eta (`float`, *optional*, defaults to 0.0):
-                Corresponds to parameter eta (η) from the [DDIM](https://huggingface.co/papers/2010.02502) paper. Only
-                applies to the [`~schedulers.DDIMScheduler`], and is ignored in other schedulers.
+                Corresponds to parameter eta (η) from the [DDIM](https://arxiv.org/abs/2010.02502) paper. Only applies
+                to the [`~schedulers.DDIMScheduler`], and is ignored in other schedulers.
             generator (`torch.Generator` or `List[torch.Generator]`, *optional*):
                 A [`torch.Generator`](https://pytorch.org/docs/stable/generated/torch.Generator.html) to make
                 generation deterministic.
@@ -675,7 +665,7 @@ class HunyuanDiTPAGPipeline(DiffusionPipeline, PAGMixin):
                 inputs will be passed.
             guidance_rescale (`float`, *optional*, defaults to 0.0):
                 Rescale the noise_cfg according to `guidance_rescale`. Based on findings of [Common Diffusion Noise
-                Schedules and Sample Steps are Flawed](https://huggingface.co/papers/2305.08891). See Section 3.4
+                Schedules and Sample Steps are Flawed](https://arxiv.org/pdf/2305.08891.pdf). See Section 3.4
             original_size (`Tuple[int, int]`, *optional*, defaults to `(1024, 1024)`):
                 The original size of the image. Used to calculate the time ids.
             target_size (`Tuple[int, int]`, *optional*):
@@ -816,11 +806,7 @@ class HunyuanDiTPAGPipeline(DiffusionPipeline, PAGMixin):
         base_size = 512 // 8 // self.transformer.config.patch_size
         grid_crops_coords = get_resize_crop_region_for_grid((grid_height, grid_width), base_size)
         image_rotary_emb = get_2d_rotary_pos_embed(
-            self.transformer.inner_dim // self.transformer.num_heads,
-            grid_crops_coords,
-            (grid_height, grid_width),
-            device=device,
-            output_type="pt",
+            self.transformer.inner_dim // self.transformer.num_heads, grid_crops_coords, (grid_height, grid_width)
         )
 
         style = torch.tensor([0], device=device)
@@ -907,15 +893,15 @@ class HunyuanDiTPAGPipeline(DiffusionPipeline, PAGMixin):
 
                 # perform guidance
                 if self.do_perturbed_attention_guidance:
-                    noise_pred, noise_pred_text = self._apply_perturbed_attention_guidance(
-                        noise_pred, self.do_classifier_free_guidance, self.guidance_scale, t, True
+                    noise_pred = self._apply_perturbed_attention_guidance(
+                        noise_pred, self.do_classifier_free_guidance, self.guidance_scale, t
                     )
                 elif self.do_classifier_free_guidance:
                     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
                     noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
 
                 if self.do_classifier_free_guidance and guidance_rescale > 0.0:
-                    # Based on 3.4. in https://huggingface.co/papers/2305.08891
+                    # Based on 3.4. in https://arxiv.org/pdf/2305.08891.pdf
                     noise_pred = rescale_noise_cfg(noise_pred, noise_pred_text, guidance_rescale=guidance_rescale)
 
                 # compute the previous noisy sample x_t -> x_t-1
