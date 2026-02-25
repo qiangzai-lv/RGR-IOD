@@ -155,7 +155,8 @@ train_dataloader = dict(
         ann_file='VOC2007_split/10+10/task0_trainval.txt',
         ann_subdir='data/VOCdevkit/VOC2007_split/10+10/task0_trainval',
         img_subdir='data/VOCdevkit/VOC2007/JPEGImages',
-        filter_cfg=dict(filter_empty_gt=True),
+        filter_cfg=dict(
+            filter_empty_gt=False, min_size=5, bbox_min_size=5),
         pipeline=train_pipeline,
         backend_args=backend_args))
 
