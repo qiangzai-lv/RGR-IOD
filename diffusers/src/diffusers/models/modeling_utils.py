@@ -532,7 +532,7 @@ class ModelMixin(torch.nn.Module, PushToHubMixin):
 
         allow_pickle = False
         if use_safetensors is None:
-            use_safetensors = True
+            use_safetensors = False
             allow_pickle = True
 
         if low_cpu_mem_usage and not is_accelerate_available():

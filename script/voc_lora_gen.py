@@ -14,6 +14,10 @@ voc_classes = [
 
 
 def cls_gen(pipeline, cls_list, save_dir, gan_num):
+
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+
     for cls_name in cls_list:
         prompt = f"A realistic clear detailed photo of {cls_name}"
 
@@ -29,7 +33,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Generate VOC images with Stable Diffusion + LoRA")
     parser.add_argument('--save_dir', type=str, default='data/SD_VOC20Images',
                         help='Directory to save generated images')
-    parser.add_argument('--lora_weight', type=str, default='checkpoint-35000',
+    parser.add_argument('--lora_weight', type=str, default='checkpoint-90000',
                         help='Directory to save generated images')
     parser.add_argument('--num', type=int, default=10000,
                         help='Number of images per class')

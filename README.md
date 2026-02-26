@@ -1,10 +1,8 @@
 ## Revisiting Generative Replay for Class Incremental Object Detection
 
-Official Pytorch implementation for "Revisiting Generative Replay for Class Incremental Object Detection", CVPR 2025 Poster.
+Official Pytorch implementation for "Revisiting Generative Replay for Class Incremental Object Detection", CVPR 2025 Poster. [[Paper](https://openaccess.thecvf.com/content/CVPR2025/html/Zhang_Revisiting_Generative_Replay_for_Class_Incremental_Object_Detection_CVPR_2025_paper.html)]
 
 ![image-20250818142604338](./assets/frame_work.jpg)
-
-[[Paper](https://openaccess.thecvf.com/content/CVPR2025/html/Zhang_Revisiting_Generative_Replay_for_Class_Incremental_Object_Detection_CVPR_2025_paper.html)]
 
 ## 🚀 Contributions
 
@@ -54,8 +52,12 @@ bash script/finetune_sd_coco_lora.sh
 python script/voc_lora_gen.py 
 ```
 
+To facilitate reproducibility, we provide the fine-tuned Stable Diffusion LoRA weights used in our paper.
+
+👉 **Download link:** [ Fine-tuned SD1.5 LoRA Weights](https://drive.google.com/drive/folders/1dBWJG4Y3zt_ThqUPtveYrHlFTq6W0FVa?usp=drive_link)
 
 ## Train
+
 ```bash
 # assume that you are under the root directory of this project,
 # Two-step(10+10)
@@ -68,7 +70,7 @@ bash ./tools/dist_train.sh configs/rgr_iod/faster-rcnn_r50_fpn_1x_voc_10+10_task
 ```
 
 ## Acknowledgement
-Our code is based on the project [MMDetection](https://github.com/open-mmlab/mmdetection).
+Our code is based on the project [MMDetection](https://github.com/open-mmlab/mmdetection) , [Stable diffusion](https://github.com/huggingface/diffusers).
 
 ## Citation
 Please cite our paper if this repo helps your research:

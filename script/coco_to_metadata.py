@@ -26,10 +26,10 @@ def coco_to_metadata(coco_json_path, metadata_jsonl_path):
     # 生成 metadata.jsonl
     with open(metadata_jsonl_path, "w", encoding="utf-8") as f:
         for img_id, info in image_id_to_info.items():
-            if not info["categories"]:
-                continue
             categories = sorted(set(info["categories"]))
             objects_str = ", ".join(categories)
+            if not info["categories"]:
+                objects_str = " "
             metadata = {
                 "file_name": info["file_name"],
                 "text": f"A realistic clear detailed photo of {objects_str}"

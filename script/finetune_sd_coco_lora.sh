@@ -1,6 +1,6 @@
 export MODEL_NAME="pretrain/stable-diffusion-v1-5"
 export DATASET_NAME="data/coco/train2017"
-accelerate launch diffusers/train_text_to_image_lora.py \
+accelerate launch script/finetune_text_to_image_lora.py \
   --pretrained_model_name_or_path=$MODEL_NAME \
   --dataset_name=$DATASET_NAME --caption_column="text" \
   --resolution=512 --random_flip \
