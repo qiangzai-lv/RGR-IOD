@@ -37,7 +37,7 @@ pip install -v -e .
 
 We use the following pretrained models in our framework:
 
-- [**Stable Diffusion v1-5**](https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5)
+- [**Stable Diffusion v1-5**](https://drive.google.com/drive/folders/1dBWJG4Y3zt_ThqUPtveYrHlFTq6W0FVa?usp=drive_link)
 
 Please download the weights from HuggingFace and put them under the pretrain/ 
 
